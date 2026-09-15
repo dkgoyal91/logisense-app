@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import './Dashboard.css'
 import { formatCellValue, formatCompact, humanizeColumnName } from '../utils/format'
 
-type DashboardTableId = 'opportunities' | 'jobs' | 'shipments' | 'vehicles'
+type DashboardTableId = 'logistics_records' | 'jobs' | 'shipments' | 'vehicles'
 
 type DashboardTableMeta = {
   id: DashboardTableId
@@ -14,7 +14,7 @@ type DashboardKpis = {
   delayed_shipments: number
   fleet_utilization_avg: number
   open_jobs: number
-  active_opportunities: number
+  active_records: number
 }
 
 type DashboardSnapshot = {
@@ -37,7 +37,7 @@ type FilterOptionsResponse = {
 }
 
 const DASHBOARD_TABLES: DashboardTableMeta[] = [
-  { id: 'opportunities', label: 'Logistics Portfolio' },
+  { id: 'logistics_records', label: 'Logistics Records' },
   { id: 'jobs', label: 'Work Orders' },
   { id: 'shipments', label: 'Shipments' },
   { id: 'vehicles', label: 'Fleet' },
@@ -47,7 +47,7 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100]
 const SEARCH_DEBOUNCE_MS = 350
 
 export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
-  const [selectedTable, setSelectedTable] = useState<DashboardTableId>('opportunities')
+  const [selectedTable, setSelectedTable] = useState<DashboardTableId>('logistics_records')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [searchInput, setSearchInput] = useState('')
@@ -190,7 +190,7 @@ export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
 
   const kpiCards = kpis
     ? [
-        { label: 'Active Logistics Portfolio', value: formatCompact(kpis.active_opportunities) },
+        { label: 'Active Logistics Records', value: formatCompact(kpis.active_records) },
         { label: 'Open Work Orders', value: formatCompact(kpis.open_jobs) },
         { label: 'Active Shipments', value: formatCompact(kpis.active_shipments) },
         { label: 'Delayed Shipments', value: formatCompact(kpis.delayed_shipments) },

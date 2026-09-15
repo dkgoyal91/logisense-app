@@ -32,7 +32,7 @@ type DashboardKpis = {
   delayed_shipments: number
   fleet_utilization_avg: number
   open_jobs: number
-  active_opportunities: number
+  active_records: number
 }
 
 type RouteRisk = {
@@ -62,13 +62,13 @@ type LiveRowsResponse = {
 type ModuleTab = {
   id: string
   label: string
-  table: 'shipments' | 'vehicles' | 'jobs' | 'opportunities'
+  table: 'shipments' | 'vehicles' | 'jobs' | 'logistics_records'
   limit: number
   helperPrompt: string
 }
 
 type QuickMetric = {
-  id: 'shipments' | 'fleet' | 'jobs' | 'opportunities'
+  id: 'shipments' | 'fleet' | 'jobs' | 'logistics_records'
   label: string
   value: string
   detail: string
@@ -78,21 +78,34 @@ type QuickMetric = {
 type PromptAction = {
   label: string
   prompt: string
+  description?: string
 }
 
 const tabs: ModuleTab[] = [
-  { id: 'freight', label: 'Active Freight & Hubs', table: 'shipments', limit: 50, helperPrompt: 'Show latest freight movements and hub activity.' },
-  { id: 'fleet', label: 'Fleet Telemetry', table: 'vehicles', limit: 50, helperPrompt: 'Show current fleet utilization and maintenance status.' },
-  { id: 'routes', label: 'Route Optimization', table: 'shipments', limit: 50, helperPrompt: 'Show route-level shipment performance for planning.' },
-  { id: 'incidents', label: 'Delay Exceptions', table: 'shipments', limit: 50, helperPrompt: 'Show delayed and exception shipment records.' },
-  { id: 'analytics', label: 'Operations KPIs', table: 'jobs', limit: 50, helperPrompt: 'Show open work orders and KPI-supporting logistics records.' },
-  { id: 'config', label: 'Logistics Portfolio', table: 'opportunities', limit: 50, helperPrompt: 'Show client and logistics portfolio context.' },
+  { id: 'freight', label: 'Freight Overview', table: 'shipments', limit: 50, helperPrompt: 'Review active shipments, hubs, and corridor pressure in one view.' },
+  { id: 'fleet', label: 'Fleet Status', table: 'vehicles', limit: 50, helperPrompt: 'Inspect fleet readiness, utilization, and maintenance exposure.' },
+  { id: 'routes', label: 'Route Planning', table: 'shipments', limit: 50, helperPrompt: 'Assess route performance before the next dispatch decision.' },
+  { id: 'incidents', label: 'Delivery Exceptions', table: 'shipments', limit: 50, helperPrompt: 'Focus on delayed loads, risk signals, and service exceptions.' },
+  { id: 'analytics', label: 'Work Orders', table: 'jobs', limit: 50, helperPrompt: 'Track open operational work and prioritize aged actions.' },
+  { id: 'config', label: 'Records Hub', table: 'logistics_records', limit: 50, helperPrompt: 'Browse logistics records, reviews, and account planning context.' },
 ]
 
 const quickStartActions: PromptAction[] = [
-  { label: 'Show logistics portfolio records with review dates in 2025', prompt: 'Show logistics portfolio records with review dates in 2025' },
-  { label: 'Show delayed shipments by delivery date', prompt: 'Show delayed shipments by delivery date' },
-  { label: 'Show open work orders sorted by days open', prompt: 'Show open work orders sorted by days open' },
+  {
+    label: 'Review 2025 records due for decision',
+    prompt: 'Show logistics records with review dates in 2025',
+    description: 'Surface records that need commercial review in the current planning cycle.',
+  },
+  {
+    label: 'Prioritize delayed shipments',
+    prompt: 'Show delayed shipments by delivery date',
+    description: 'Sort late deliveries into a clear operational queue for recovery planning.',
+  },
+  {
+    label: 'Escalate ageing work orders',
+    prompt: 'Show open work orders sorted by days open',
+    description: 'Identify the oldest open actions before they impact service delivery.',
+  },
 ]
 
 const suggestedPrompts: PromptAction[] = [
@@ -132,13 +145,13 @@ const buildAssistantText = (data: ChatResponse): string => {
   const rowCount = Array.isArray(data.rows) ? data.rows.length : 0
 
   if (rowCount === 0) {
-    return stripMarkdownTableSyntax(rawText)
+    return sanitizeVisibleText(stripMarkdownTableSyntax(rawText))
   }
 
   const markerIndex = rawText.toLowerCase().indexOf('example rows:')
   const trimmed = markerIndex >= 0 ? rawText.slice(0, markerIndex).trim() : rawText
 
-  return stripMarkdownTableSyntax(trimmed) || 'Here are the matching records.'
+  return sanitizeVisibleText(stripMarkdownTableSyntax(trimmed) || 'Here are the matching records.')
 }
 
 const buildResultSummary = (rows: Record<string, unknown>[], table?: string | null, fallback = 'Result set ready'): string => {
@@ -223,16 +236,28 @@ const formatTimestamp = (value?: number): string => {
 
 const formatColumnLabel = (column: string): string => {
   const normalized = column
-    .replace(/opportunity_ref/gi, 'pipeline_ref')
-    .replace(/salesforce_number/gi, 'pipeline_ref')
+    .replace(/opportunity_ref/gi, 'record_ref')
+    .replace(/pipeline_ref/gi, 'record_ref')
+    .replace(/salesforce_number/gi, 'record_ref')
     .replace(/job_director/gi, 'operations_lead')
     .replace(/opportunity_owner/gi, 'logistics_owner')
     .replace(/valuation_date/gi, 'review_date')
     .replace(/number_of_properties/gi, 'route_count')
+    .replace(/portfolio/gi, 'record set')
     .replace(/_+/g, ' ')
     .trim()
 
   return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+const sanitizeVisibleText = (text: string): string => {
+  return text
+    .replace(/\bopportunities?\b/gi, 'logistics records')
+    .replace(/\bportfolio\b/gi, 'record set')
+    .replace(/\bpipeline\b/gi, 'logistics flow')
+    .replace(/\bprojects?\b/gi, 'logistics work')
+    .replace(/\bvaluation\b/gi, 'review')
+    .replace(/\bopportunity\b/gi, 'logistics record')
 }
 
 const buildFullTableText = (rows: Record<string, unknown>[], table?: string | null): string => {
@@ -251,23 +276,23 @@ const buildFullTableText = (rows: Record<string, unknown>[], table?: string | nu
   return [header, ...lines].join('\n')
 }
 
-// Grounded, honest trace of what the agent pipeline actually did — never invented reasoning.
+// Grounded, honest trace of what the agent workflow did — never invented reasoning.
+const NAME_LIKE_KEYS = ['customer', 'client_name', 'destination', 'route', 'region', 'depot']
+
 const buildThinkingSteps = (message: ChatMessage): string[] => {
   const table = message.data?.table
   const rowCount = message.data?.rows?.length ?? 0
   const steps = ['Router agent reviewed the question and matched it to the approved logistics data model.']
 
   if (table) {
-    steps.push(`SQL agent executed a validated, read-only query against the "${table}" table and retrieved ${rowCount} record${rowCount === 1 ? '' : 's'}.`)
+    steps.push(`SQL agent executed a validated, read-only query against the approved logistics records model and retrieved ${rowCount} record${rowCount === 1 ? '' : 's'}.`)
     steps.push('Summary agent grounded the response strictly in the retrieved rows before phrasing the final answer.')
   } else {
-    steps.push('SQL agent found no approved table matching this question, so no data was queried.')
+    steps.push('SQL agent found no approved logistics records matching this question, so no data was queried.')
   }
 
   return steps
 }
-
-const NAME_LIKE_KEYS = ['customer', 'client_name', 'destination', 'route', 'region', 'depot']
 
 // Builds contextual follow-up prompts from the entities actually present in the result rows.
 const buildContextualPrompts = (rows: Record<string, unknown>[], table: string | null | undefined): PromptAction[] => {
@@ -319,6 +344,11 @@ function App() {
   const visibleMessages = isWelcomeState ? [] : activeMessages
   const lastAssistantWithRows = [...activeMessages].reverse().find((message) => message.role === 'assistant' && (message.data?.rows?.length ?? 0) > 0)
   const contextualPrompts = buildContextualPrompts(lastAssistantWithRows?.data?.rows ?? [], lastAssistantWithRows?.data?.table)
+  const topbarTitle = activeView === 'dashboard' ? 'LogiSense Operations Dashboard' : 'LogiSense Logistics Copilot'
+  const topbarSubtitle = activeView === 'dashboard'
+    ? 'Track live KPIs, review network exceptions, and inspect operational records.'
+    : 'Ask grounded questions across shipments, fleet, routes, and work orders.'
+  const canSendMessage = draft.trim().length > 0 && !isLoading
 
   const appendSessionMessage = (sessionId: string, message: ChatMessage) => {
     setChatSessions((current) =>
@@ -356,10 +386,10 @@ function App() {
       icon: 'J',
     },
     {
-      id: 'opportunities',
-      label: 'Portfolio',
-      value: dashboard ? formatCompact(dashboard.kpis.active_opportunities) : '...',
-      detail: 'Active logistics portfolio',
+      id: 'logistics_records',
+      label: 'Records',
+      value: dashboard ? formatCompact(dashboard.kpis.active_records) : '...',
+      detail: 'Active logistics records',
       icon: 'P',
     },
   ]
@@ -480,7 +510,7 @@ function App() {
     setIsLoading(false)
   }
 
-  const handleIconClick = (mode: 'shipments' | 'fleet' | 'jobs' | 'opportunities') => {
+  const handleIconClick = (mode: 'shipments' | 'fleet' | 'jobs' | 'logistics_records') => {
     if (mode === 'shipments') {
       void handleTabClick(tabs[0])
       return
@@ -577,80 +607,90 @@ function App() {
   return (
     <div className="logisense-shell">
       <header className="app-topbar">
-        <div className="app-topbar-brand">
-          <div className="app-topbar-logo" aria-hidden="true">LS</div>
-          <div className="app-topbar-copy">
-            <span className="app-topbar-title">LogiSense Logistics Copilot</span>
-            <span className="app-topbar-subtitle">End-to-end logistics intelligence</span>
+        <div className="app-topbar-primary">
+          <div className="app-topbar-brand">
+            <div className="app-topbar-logo" aria-hidden="true">LS</div>
+            <div className="app-topbar-copy">
+              <span className="app-topbar-title">{topbarTitle}</span>
+              <span className="app-topbar-subtitle">{topbarSubtitle}</span>
+            </div>
+          </div>
+
+          <div className="app-view-switch" role="tablist" aria-label="Primary view">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === 'chat'}
+              className={`app-view-switch-item ${activeView === 'chat' ? 'active' : ''}`}
+              onClick={() => setActiveView('chat')}
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeView === 'dashboard'}
+              className={`app-view-switch-item ${activeView === 'dashboard' ? 'active' : ''}`}
+              onClick={() => setActiveView('dashboard')}
+            >
+              Dashboard
+            </button>
+          </div>
+
+          <div className="app-topbar-controls">
+            <button type="button" className={autoRefresh ? 'active' : ''} onClick={() => setAutoRefresh((value) => !value)}>
+              {autoRefresh ? 'Auto Refresh On' : 'Auto Refresh Off'}
+            </button>
+            <button type="button" onClick={() => void handleRefreshClick()}>
+              Refresh Data
+            </button>
           </div>
         </div>
 
-        <div className="app-view-switch" role="tablist" aria-label="Primary view">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === 'chat'}
-            className={`app-view-switch-item ${activeView === 'chat' ? 'active' : ''}`}
-            onClick={() => setActiveView('chat')}
-          >
-            Chat
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === 'dashboard'}
-            className={`app-view-switch-item ${activeView === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setActiveView('dashboard')}
-          >
-            Dashboard
-          </button>
-        </div>
+        <div className="app-topbar-secondary">
+          {activeView === 'chat' ? (
+            <nav className="app-topbar-nav" aria-label="Operations modules">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`app-topbar-nav-item ${tab.id === selectedTabId ? 'active' : ''}`}
+                  onClick={() => void handleTabClick(tab)}
+                  aria-label={tab.label}
+                  title={tab.helperPrompt}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+          ) : (
+            <div className="app-topbar-status-strip" aria-label="Dashboard status">
+              <span className="app-status-pill">Live operations view</span>
+              <span className="app-status-copy">Monitor KPIs, records, and operational exceptions in one workspace.</span>
+            </div>
+          )}
 
-        {activeView === 'chat' ? (
-          <nav className="app-topbar-nav" aria-label="Operations modules">
-            {tabs.map((tab) => (
+          <div className="app-topbar-metrics" aria-label="Quick metrics">
+            {quickMetrics.map((metric) => (
               <button
-                key={tab.id}
+                key={metric.id}
                 type="button"
-                className={`app-topbar-nav-item ${tab.id === selectedTabId ? 'active' : ''}`}
-                onClick={() => void handleTabClick(tab)}
-                aria-label={tab.label}
-                title={tab.helperPrompt}
+                className="app-topbar-metric"
+                onClick={() => {
+                  setActiveView('chat')
+                  handleIconClick(metric.id)
+                }}
+                aria-label={`${metric.label} quick metric`}
+                title={metric.detail}
               >
-                {tab.label}
+                <span className="app-topbar-metric-mark">{metric.icon}</span>
+                <span className="app-topbar-metric-body">
+                  <strong>{metric.value}</strong>
+                  <span>{metric.label}</span>
+                </span>
               </button>
             ))}
-          </nav>
-        ) : null}
-
-        <div className="app-topbar-metrics" aria-label="Quick metrics">
-          {quickMetrics.map((metric) => (
-            <button
-              key={metric.id}
-              type="button"
-              className="app-topbar-metric"
-              onClick={() => {
-                setActiveView('chat')
-                handleIconClick(metric.id)
-              }}
-              aria-label={`${metric.label} quick metric`}
-            >
-              <span className="app-topbar-metric-mark">{metric.icon}</span>
-              <span className="app-topbar-metric-body">
-                <strong>{metric.value}</strong>
-                <span>{metric.label}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-
-        <div className="app-topbar-controls">
-          <button type="button" onClick={() => setAutoRefresh((value) => !value)}>
-            {autoRefresh ? 'Auto ON' : 'Auto OFF'}
-          </button>
-          <button type="button" onClick={() => void handleRefreshClick()}>
-            Refresh
-          </button>
+          </div>
         </div>
       </header>
 
@@ -661,14 +701,13 @@ function App() {
       ) : (
       <main className="chat-stage">
         <header className="chat-stage-header">
-          <div className="chat-brand-block">
-            <div className="chat-logo" aria-hidden="true">
-              <span>LS</span>
+          <div className="chat-stage-context">
+            <span className="chat-stage-eyebrow">Operations chat</span>
+            <div className="chat-stage-title-row">
+              <h2>{selectedTab.label}</h2>
+              <span className="chat-stage-chip">Live</span>
             </div>
-            <div>
-              <h2>LogiSense Logistics AI</h2>
-              <p>Your end-to-end logistics assistant</p>
-            </div>
+            <p>{selectedTab.helperPrompt}</p>
           </div>
 
           <div className="chat-controls">
@@ -722,8 +761,9 @@ function App() {
           {isWelcomeState ? (
             <div className="assistant-welcome">
               <div className="assistant-welcome-mark">LS</div>
-              <h3>Welcome back, Dinesh! 👋</h3>
-              <p>I'm here to help you track shipments, monitor fleet performance, and answer questions across your logistics operations.</p>
+              <span className="assistant-welcome-eyebrow">Live workspace</span>
+              <h3>Start with a logistics question or choose an operational workflow.</h3>
+              <p>Use the modules above to inspect freight, fleet, route risk, work orders, and records without leaving the workspace.</p>
             </div>
           ) : null}
 
@@ -863,12 +903,18 @@ function App() {
 
                   {isWelcomeState ? (
                     <div className="quick-start-block">
-                      <h4>Quick Start</h4>
+                      <div className="section-heading">
+                        <h4>Quick Start</h4>
+                        <p>Choose a high-value workflow to open the first grounded result set.</p>
+                      </div>
                       <div className="quick-start-list">
                         {quickStartActions.map((action) => (
                           <button key={action.label} type="button" className="quick-start-row" onClick={() => void handleSend(action.prompt)}>
-                            <span className="quick-start-icon">💡</span>
-                            <span className="quick-start-label">{action.label}</span>
+                            <span className="quick-start-icon" aria-hidden="true">✦</span>
+                            <span className="quick-start-copy">
+                              <span className="quick-start-label">{action.label}</span>
+                              <span className="quick-start-description">{action.description}</span>
+                            </span>
                             <span className="quick-start-chevron">›</span>
                           </button>
                         ))}
@@ -876,7 +922,10 @@ function App() {
                     </div>
                   ) : (
                     <div className="suggestion-block">
-                      <h4>Suggested Prompts</h4>
+                      <div className="section-heading compact">
+                        <h4>Suggested Prompts</h4>
+                        <p>Follow the current result context with another grounded question.</p>
+                      </div>
                       <div className="suggestion-row">
                         {contextualPrompts.map((item) => (
                           <button key={item.label} type="button" className="suggestion-pill" onClick={() => void handleSend(item.prompt)}>
@@ -895,7 +944,7 @@ function App() {
                       value={draft}
                       maxLength={1500}
                       aria-label="Ask logistics copilot"
-                      placeholder="Ask about shipments, fleet, routes, or warehouse operations..."
+                      placeholder="Ask a grounded question about freight, fleet, route risk, or work orders..."
                       onChange={(event) => setDraft(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
@@ -905,8 +954,8 @@ function App() {
                     />
                     <span className="composer-counter">{draft.length}/1500</span>
                   </div>
-                  <button type="button" onClick={() => void handleSend()} aria-label="Send message">
-                    ➤
+                  <button type="button" onClick={() => void handleSend()} aria-label="Send message" disabled={!canSendMessage}>
+                    Send
                   </button>
                 </div>
               </main>

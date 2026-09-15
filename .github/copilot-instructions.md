@@ -50,6 +50,9 @@ This repository is a senior-grade logistics AI demo for a 45-minute session. The
 - Keep the UI polished, responsive, and accessible.
 - Make the chatbot flow feel real: user question → safe SQL → results → summary.
 - Prioritize a working prototype that demonstrates architecture and value over complexity.
+- Write UI labels and section headers with senior product-owner discipline: avoid repeating brand names in nested surfaces, prefer action-oriented copy, and make each label explain the operational value of that area.
+- Keep one primary title per surface. Secondary areas should show workflow context, state, or next action rather than repeating product branding.
+- Favor decision-support copy over generic assistant language: every prompt, module, and status label should help an operator know what to review, what is at risk, or what action comes next.
 
 ## Working style
 - Keep the codebase organized and consistent.

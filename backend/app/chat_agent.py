@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict, deque
 from typing import Any
 
@@ -21,6 +22,24 @@ conversation_store: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
 # Remembers the last table each session queried, so follow-up questions ("show more of those")
 # stay grounded without the user having to restate the table every turn.
 last_table_by_session: dict[str, str | None] = defaultdict(lambda: None)
+
+
+def _sanitize_logistics_text(text: str) -> str:
+    if not text:
+        return text
+
+    sanitized = text
+    replacements = [
+        (r'\bopportunities?\b', 'logistics records'),
+        (r'\bportfolio\b', 'record set'),
+        (r'\bpipeline\b', 'logistics flow'),
+        (r'\bprojects?\b', 'logistics work'),
+        (r'\bvaluation\b', 'review'),
+        (r'\bproperty\b', 'site'),
+    ]
+    for pattern, replacement in replacements:
+        sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
+    return sanitized
 
 
 def build_llm() -> Any | None:
@@ -78,15 +97,15 @@ def sql_agent(state: dict[str, Any]) -> dict[str, Any]:
 
     state['table'] = table
     state['rows'] = rows
-    state['summary'] = summary
+    state['summary'] = _sanitize_logistics_text(summary)
 
     if table is None:
-        state['grounded_answer'] = summary
+        state['grounded_answer'] = state['summary']
         return state
 
     preview = rows[:3]
-    state['grounded_answer'] = (
-        f'{summary} The query targeted the {table} table. '
+    state['grounded_answer'] = _sanitize_logistics_text(
+        f'{state["summary"]} The query targeted the approved logistics records model. '
         f'Example rows: {preview if preview else "no matching records"}.'
     )
     return state
@@ -162,8 +181,9 @@ def summary_agent(state: dict[str, Any]) -> dict[str, Any]:
         result = llm.invoke(messages)
         content = str(getattr(result, 'content', result)).strip()
         if content:
-            state['final_response'] = content
-            state['short_summary'] = content
+            cleaned_content = _sanitize_logistics_text(content)
+            state['final_response'] = cleaned_content
+            state['short_summary'] = cleaned_content
     except Exception:
         # Keep the safe, data-grounded answer already set above.
         pass
@@ -221,9 +241,9 @@ def process_chat_turn(session_id: str, user_message: str) -> dict[str, Any]:
     else:
         state = agent_graph.invoke(state)
 
-    answer = state.get('final_response', 'No response generated.')
+    answer = _sanitize_logistics_text(state.get('final_response', 'No response generated.'))
     rows = state.get('rows', [])
-    summary = state.get('summary', 'No SQL query executed.')
+    summary = _sanitize_logistics_text(state.get('summary', 'No SQL query executed.'))
     table = state.get('table')
 
     conversation_store[session_id].append(f'User: {trimmed_message}')

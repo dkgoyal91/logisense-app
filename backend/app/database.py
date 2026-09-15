@@ -29,7 +29,7 @@ def get_connection() -> sqlite3.Connection:
     return connection
 
 
-def _generate_opportunities() -> list[dict[str, Any]]:
+def _generate_logistics_records() -> list[dict[str, Any]]:
     client_names = [
         'Sage Homes Limited',
         'Test Client UK UAT1',
@@ -79,7 +79,7 @@ def _generate_opportunities() -> list[dict[str, Any]]:
         review_date = f'{review_year}-{month:02d}-{day:02d}'
         rows.append(
             {
-                'pipeline_ref': f'SF-{24000 + index}',
+                'record_ref': f'SF-{24000 + index}',
                 'client_name': client_name,
                 'operations_lead': operations_lead,
                 'logistics_owner': logistics_owner,
@@ -108,7 +108,7 @@ def _generate_jobs() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for index in range(1, 561):
         client_name = client_names[(index - 1) % len(client_names)]
-        opportunity_ref = f'SF-{24000 + index}'
+        record_ref = f'SF-{24000 + index}'
         region = regions[(index - 1) % len(regions)]
         status = stages[(index - 1) % len(stages)]
         progress_pct = 18 + ((index * 17) % 82)
@@ -118,7 +118,7 @@ def _generate_jobs() -> list[dict[str, Any]]:
         rows.append(
             {
                 'job_id': f'JOB-{1000 + index}',
-                'opportunity_ref': opportunity_ref,
+                'record_ref': record_ref,
                 'client_name': client_name,
                 'region': region,
                 'status': status,
@@ -183,7 +183,7 @@ def _generate_vehicles() -> list[dict[str, Any]]:
 
 def _build_table_cache() -> dict[str, list[dict[str, Any]]]:
     return {
-        'opportunities': _generate_opportunities(),
+        'logistics_records': _generate_logistics_records(),
         'jobs': _generate_jobs(),
         'shipments': _generate_shipments(),
         'vehicles': _generate_vehicles(),
@@ -197,8 +197,8 @@ def load_table_cache() -> dict[str, list[dict[str, Any]]]:
         with cache_path.open('r', encoding='utf-8') as handle:
             cache = json.load(handle)
 
-        opportunities_rows = cache.get('opportunities', [])
-        if opportunities_rows and not any('pipeline_ref' in row for row in opportunities_rows[:1]):
+        logistics_rows = cache.get('logistics_records', cache.get('opportunities', []))
+        if logistics_rows and not any('record_ref' in row for row in logistics_rows[:1]):
             cache = _build_table_cache()
             with cache_path.open('w', encoding='utf-8') as handle:
                 json.dump(cache, handle, indent=2)
@@ -212,11 +212,11 @@ def load_table_cache() -> dict[str, list[dict[str, Any]]]:
     return cache
 
 
-def _seed_opportunities(connection: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
+def _seed_logistics_records(connection: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
     connection.executemany(
         """
-        INSERT INTO opportunities (
-            pipeline_ref,
+        INSERT INTO logistics_records (
+            record_ref,
             client_name,
             operations_lead,
             logistics_owner,
@@ -226,7 +226,7 @@ def _seed_opportunities(connection: sqlite3.Connection, rows: list[dict[str, Any
             region,
             value_usd
         ) VALUES (
-            :pipeline_ref,
+            :record_ref,
             :client_name,
             :operations_lead,
             :logistics_owner,
@@ -246,7 +246,7 @@ def _seed_jobs(connection: sqlite3.Connection, rows: list[dict[str, Any]]) -> No
         """
         INSERT INTO jobs (
             job_id,
-            opportunity_ref,
+            record_ref,
             client_name,
             region,
             status,
@@ -256,7 +256,7 @@ def _seed_jobs(connection: sqlite3.Connection, rows: list[dict[str, Any]]) -> No
             current_stage
         ) VALUES (
             :job_id,
-            :opportunity_ref,
+            :record_ref,
             :client_name,
             :region,
             :status,
@@ -334,11 +334,19 @@ def initialize_database() -> None:
             if legacy_columns & {'job_director', 'opportunity_owner', 'salesforce_number', 'valuation_date', 'number_of_properties'}:
                 connection.execute('ALTER TABLE opportunities RENAME TO opportunities_legacy')
 
+        legacy_logistics_table_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'logistics_records'"
+        ).fetchone() is not None
+        if legacy_logistics_table_exists:
+            current_columns = {row[1] for row in connection.execute('PRAGMA table_info(logistics_records)').fetchall()}
+            if 'record_ref' not in current_columns:
+                connection.execute('ALTER TABLE logistics_records RENAME TO logistics_records_legacy')
+
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS opportunities (
+            CREATE TABLE IF NOT EXISTS logistics_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pipeline_ref TEXT UNIQUE NOT NULL,
+                record_ref TEXT UNIQUE NOT NULL,
                 client_name TEXT NOT NULL,
                 operations_lead TEXT NOT NULL,
                 logistics_owner TEXT NOT NULL,
@@ -356,8 +364,8 @@ def initialize_database() -> None:
         ).fetchone() is not None:
             connection.execute(
                 """
-                INSERT OR IGNORE INTO opportunities (
-                    pipeline_ref,
+                INSERT OR IGNORE INTO logistics_records (
+                    record_ref,
                     client_name,
                     operations_lead,
                     logistics_owner,
@@ -382,12 +390,51 @@ def initialize_database() -> None:
             )
             connection.execute('DROP TABLE opportunities_legacy')
 
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'logistics_records_legacy'"
+        ).fetchone() is not None:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO logistics_records (
+                    record_ref,
+                    client_name,
+                    operations_lead,
+                    logistics_owner,
+                    route_count,
+                    review_date,
+                    status,
+                    region,
+                    value_usd
+                )
+                SELECT
+                    pipeline_ref,
+                    client_name,
+                    operations_lead,
+                    logistics_owner,
+                    route_count,
+                    review_date,
+                    status,
+                    region,
+                    value_usd
+                FROM logistics_records_legacy
+                """
+            )
+            connection.execute('DROP TABLE logistics_records_legacy')
+
+        legacy_jobs_table_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'jobs'"
+        ).fetchone() is not None
+        if legacy_jobs_table_exists:
+            current_job_columns = {row[1] for row in connection.execute('PRAGMA table_info(jobs)').fetchall()}
+            if 'record_ref' not in current_job_columns:
+                connection.execute('ALTER TABLE jobs RENAME TO jobs_legacy')
+
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id TEXT UNIQUE NOT NULL,
-                opportunity_ref TEXT NOT NULL,
+                record_ref TEXT NOT NULL,
                 client_name TEXT NOT NULL,
                 region TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -398,6 +445,37 @@ def initialize_database() -> None:
             )
             """
         )
+
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'jobs_legacy'"
+        ).fetchone() is not None:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO jobs (
+                    job_id,
+                    record_ref,
+                    client_name,
+                    region,
+                    status,
+                    progress_pct,
+                    days_open,
+                    total_properties,
+                    current_stage
+                )
+                SELECT
+                    job_id,
+                    opportunity_ref,
+                    client_name,
+                    region,
+                    status,
+                    progress_pct,
+                    days_open,
+                    total_properties,
+                    current_stage
+                FROM jobs_legacy
+                """
+            )
+            connection.execute('DROP TABLE jobs_legacy')
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS shipments (
@@ -428,7 +506,7 @@ def initialize_database() -> None:
         )
 
         minimum_targets = {
-            'opportunities': 620,
+            'logistics_records': 620,
             'jobs': 560,
             'shipments': 660,
             'vehicles': 540,
@@ -440,19 +518,19 @@ def initialize_database() -> None:
 
         needs_reseed = any(current_counts[table] < target for table, target in minimum_targets.items())
         if needs_reseed:
-            connection.execute('DELETE FROM opportunities')
+            connection.execute('DELETE FROM logistics_records')
             connection.execute('DELETE FROM jobs')
             connection.execute('DELETE FROM shipments')
             connection.execute('DELETE FROM vehicles')
-            connection.execute("DELETE FROM sqlite_sequence WHERE name IN ('opportunities', 'jobs', 'shipments', 'vehicles')")
+            connection.execute("DELETE FROM sqlite_sequence WHERE name IN ('logistics_records', 'jobs', 'shipments', 'vehicles')")
 
-        if needs_reseed or current_counts['opportunities'] == 0 or current_counts['jobs'] == 0 or current_counts['shipments'] == 0 or current_counts['vehicles'] == 0:
+        if needs_reseed or current_counts['logistics_records'] == 0 or current_counts['jobs'] == 0 or current_counts['shipments'] == 0 or current_counts['vehicles'] == 0:
             table_cache = load_table_cache()
         else:
             table_cache = None
 
-        if needs_reseed or current_counts['opportunities'] == 0:
-            _seed_opportunities(connection, table_cache['opportunities'])
+        if needs_reseed or current_counts['logistics_records'] == 0:
+            _seed_logistics_records(connection, table_cache['logistics_records'])
         if needs_reseed or current_counts['jobs'] == 0:
             _seed_jobs(connection, table_cache['jobs'])
         if needs_reseed or current_counts['shipments'] == 0:

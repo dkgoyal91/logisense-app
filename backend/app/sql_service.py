@@ -8,8 +8,8 @@ from app.config import settings
 from app.database import get_connection
 
 ALLOWED_TABLES: dict[str, set[str]] = {
-    'opportunities': {
-        'pipeline_ref',
+    'logistics_records': {
+        'record_ref',
         'client_name',
         'operations_lead',
         'logistics_owner',
@@ -21,7 +21,7 @@ ALLOWED_TABLES: dict[str, set[str]] = {
     },
     'jobs': {
         'job_id',
-        'opportunity_ref',
+        'record_ref',
         'client_name',
         'region',
         'status',
@@ -51,7 +51,7 @@ ALLOWED_TABLES: dict[str, set[str]] = {
 }
 
 TABLE_DEFAULT_ORDER: dict[str, str] = {
-    'opportunities': 'review_date DESC',
+    'logistics_records': 'review_date DESC',
     'jobs': 'days_open DESC',
     'shipments': 'delivery_date DESC',
     'vehicles': 'utilization_pct DESC',
@@ -59,7 +59,7 @@ TABLE_DEFAULT_ORDER: dict[str, str] = {
 
 # Columns exposed as dashboard filter dropdowns, restricted to low-cardinality categorical fields.
 FILTERABLE_COLUMNS: dict[str, list[str]] = {
-    'opportunities': ['status', 'region'],
+    'logistics_records': ['status', 'region'],
     'jobs': ['status', 'region', 'current_stage'],
     'shipments': ['status', 'origin', 'destination'],
     'vehicles': ['status', 'depot'],
@@ -81,7 +81,7 @@ CITY_COORDINATES: dict[str, tuple[float, float]] = {
 
 LOCATION_COLUMN_BY_TABLE: dict[str, str] = {
     'shipments': 'destination',
-    'opportunities': 'region',
+    'logistics_records': 'region',
     'jobs': 'region',
     'vehicles': 'depot',
 }
@@ -119,38 +119,43 @@ def _extract_name(message: str) -> str | None:
     return name if name else None
 
 
+def _resolve_runtime_table_name(table_name: str) -> str:
+    return table_name
+
+
 def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[Any]]:
+    resolved_table_name = _resolve_runtime_table_name(table_name)
     columns = ', '.join(sorted(ALLOWED_TABLES[table_name]))
     lower_message = message.lower()
     params: list[Any] = []
 
-    if table_name == 'opportunities':
+    if table_name == 'logistics_records':
         if 'managed by' in lower_message or 'operations lead' in lower_message or 'job director' in lower_message:
             name = _extract_name(message)
             if name:
                 return (
-                    f"SELECT {columns} FROM opportunities WHERE operations_lead = ? ORDER BY review_date DESC LIMIT ?",
+                    f"SELECT {columns} FROM {resolved_table_name} WHERE operations_lead = ? ORDER BY review_date DESC LIMIT ?",
                     [name, settings.row_limit],
                 )
-        if 'owner' in lower_message and ('logistics_owner' in lower_message or 'opportunity_owner' in lower_message):
+        if 'owner' in lower_message and ('logistics_owner' in lower_message or 'record_owner' in lower_message):
             name = _extract_name(message)
             if name:
                 return (
-                    f"SELECT {columns} FROM opportunities WHERE logistics_owner = ? ORDER BY review_date DESC LIMIT ?",
+                    f"SELECT {columns} FROM {resolved_table_name} WHERE logistics_owner = ? ORDER BY review_date DESC LIMIT ?",
                     [name, settings.row_limit],
                 )
         if '2025' in lower_message or 'review date in 2025' in lower_message or 'valuation date in 2025' in lower_message:
             return (
-                f"SELECT {columns} FROM opportunities WHERE review_date LIKE ? ORDER BY review_date DESC LIMIT ?",
+                f"SELECT {columns} FROM {resolved_table_name} WHERE review_date LIKE ? ORDER BY review_date DESC LIMIT ?",
                 ['2025%', settings.row_limit],
             )
         if 'test client uk uat1' in lower_message or 'test client' in lower_message:
             return (
-                f"SELECT {columns} FROM opportunities WHERE client_name LIKE ? ORDER BY review_date DESC LIMIT ?",
+                f"SELECT {columns} FROM {resolved_table_name} WHERE client_name LIKE ? ORDER BY review_date DESC LIMIT ?",
                 ['%Test Client%', settings.row_limit],
             )
         return (
-            f"SELECT {columns} FROM opportunities ORDER BY review_date DESC LIMIT ?",
+            f"SELECT {columns} FROM {resolved_table_name} ORDER BY review_date DESC LIMIT ?",
             [settings.row_limit],
         )
 
@@ -210,8 +215,8 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
 
 def detect_table_from_message(message: str) -> str | None:
     lower_message = message.lower()
-    if any(term in lower_message for term in ['pipeline', 'logistics pipeline', 'opportunity', 'opportunities', 'projects', 'client', 'valuation', 'review date', 'operations lead', 'logistics owner', 'salesforce', 'properties', 'route count']):
-        return 'opportunities'
+    if any(term in lower_message for term in ['pipeline', 'logistics pipeline', 'record', 'records', 'projects', 'client', 'valuation', 'review date', 'operations lead', 'logistics owner', 'salesforce', 'properties', 'route count', 'logistics records', 'record set']):
+        return 'logistics_records'
     if any(term in lower_message for term in ['job', 'jobs', 'work order', 'work orders', 'stage', 'progress', 'days open', 'current stage']):
         return 'jobs'
     if any(term in lower_message for term in ['shipment', 'shipments', 'delivery', 'route', 'origin', 'destination', 'cargo']):
@@ -253,7 +258,7 @@ def execute_safe_query(message: str, table_hint: str | None = None) -> dict[str,
         'table': table_name,
         'sql': sql,
         'rows': rows,
-        'summary': f'Fetched {len(rows)} records from {table_name}.',
+        'summary': f'Fetched {len(rows)} logistics records.',
     }
 
 
@@ -266,7 +271,7 @@ def get_dashboard_snapshot() -> dict[str, Any]:
             'delayed_shipments': connection.execute("SELECT COUNT(*) FROM shipments WHERE status = 'Delayed'").fetchone()[0],
             'fleet_utilization_avg': connection.execute("SELECT ROUND(AVG(utilization_pct), 1) FROM vehicles").fetchone()[0] or 0,
             'open_jobs': connection.execute("SELECT COUNT(*) FROM jobs WHERE status != 'Completed'").fetchone()[0],
-            'active_opportunities': connection.execute("SELECT COUNT(*) FROM opportunities").fetchone()[0],
+            'active_records': connection.execute(f"SELECT COUNT(*) FROM {_resolve_runtime_table_name('logistics_records')}").fetchone()[0],
         }
 
         route_risks = [

@@ -167,29 +167,74 @@ def _start_local() -> None:
     _log('Use: python3 run.py stop to stop both services')
 
 
+def _kill_local_by_pattern(patterns: list[str]) -> bool:
+    killed_any = False
+    for pattern in patterns:
+        try:
+            result = subprocess.run(['pgrep', '-f', pattern], capture_output=True, text=True, check=False)
+        except FileNotFoundError:
+            continue
+        for pid_text in result.stdout.split():
+            try:
+                os.kill(int(pid_text), signal.SIGTERM)
+                killed_any = True
+            except (ProcessLookupError, ValueError):
+                continue
+    return killed_any
+
+
+def _has_local_process_running() -> bool:
+    patterns = [
+        'uvicorn app.main:app --host 0.0.0.0 --port 8000',
+        'vite --host 0.0.0.0',
+        'npm run dev -- --host 0.0.0.0',
+        'npm run dev --host 0.0.0.0',
+    ]
+    for pattern in patterns:
+        try:
+            result = subprocess.run(['pgrep', '-f', pattern], capture_output=True, text=True, check=False)
+        except FileNotFoundError:
+            continue
+        if result.stdout.strip():
+            return True
+    return False
+
+
 def _stop_local() -> None:
     pid_file = _pid_file()
-    if not pid_file.exists():
-        _log('No local process file found; nothing to stop.')
-        return
+    stopped = False
 
-    try:
-        pids = json.loads(pid_file.read_text())
-    except Exception:
-        _log('Could not read local PID file; removing stale state.')
-        pid_file.unlink(missing_ok=True)
-        return
-
-    for key in ('backend', 'frontend'):
-        pid = pids.get(key)
-        if not pid:
-            continue
+    if pid_file.exists():
         try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    pid_file.unlink(missing_ok=True)
-    _log('Stopped local services.')
+            pids = json.loads(pid_file.read_text())
+        except Exception:
+            _log('Could not read local PID file; removing stale state.')
+            pid_file.unlink(missing_ok=True)
+        else:
+            for key in ('backend', 'frontend'):
+                pid = pids.get(key)
+                if not pid:
+                    continue
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    stopped = True
+                except ProcessLookupError:
+                    pass
+            pid_file.unlink(missing_ok=True)
+
+    patterns = [
+        'uvicorn app.main:app --host 0.0.0.0 --port 8000',
+        'vite --host 0.0.0.0',
+        'npm run dev -- --host 0.0.0.0',
+        'npm run dev --host 0.0.0.0',
+    ]
+    if _kill_local_by_pattern(patterns):
+        stopped = True
+
+    if stopped:
+        _log('Stopped local services.')
+    else:
+        _log('No local services were running.')
 
 
 def _compose_command(*args: str) -> list[str]:
@@ -225,12 +270,17 @@ def _status_docker() -> None:
     subprocess.run(_compose_command('ps'), cwd=str(ROOT), check=True)
 
 
-def _ensure_docker_compose_file() -> None:
+def _compose_file_exists() -> bool:
     compose_candidates = ['docker-compose.yml', 'compose.yml', 'docker-compose.yaml', 'compose.yaml']
     for name in compose_candidates:
         if (ROOT / name).exists():
-            return
-    raise FileNotFoundError('No Docker Compose file was found in the repo root.')
+            return True
+    return False
+
+
+def _ensure_docker_compose_file() -> None:
+    if not _compose_file_exists():
+        raise FileNotFoundError('No Docker Compose file was found in the repo root.')
 
 
 def _parse_args() -> argparse.Namespace:
@@ -256,11 +306,13 @@ def main() -> int:
             _start_docker()
             return 0
         if args.mode == 'stop':
-            if _pid_file().exists():
+            if _has_local_process_running() or _pid_file().exists():
                 _stop_local()
-            else:
-                _ensure_docker_compose_file()
+                return 0
+            if _compose_file_exists():
                 _stop_docker()
+                return 0
+            _log('No local or Docker services were running.')
             return 0
         if args.mode == 'restart':
             if _pid_file().exists():

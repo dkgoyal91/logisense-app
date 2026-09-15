@@ -73,8 +73,8 @@ input:focus-visible {
 
 .app-topbar {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
   gap: 14px;
   padding: 12px 18px;
   border-radius: 18px;
@@ -83,10 +83,25 @@ input:focus-visible {
   box-shadow: 0 18px 50px rgba(2, 6, 23, 0.26);
 }
 
+.app-topbar-primary,
+.app-topbar-secondary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.app-topbar-secondary {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
 .app-topbar-brand {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex: 1;
 }
 
 .app-topbar-logo {
@@ -117,6 +132,7 @@ input:focus-visible {
 .app-topbar-subtitle {
   color: #94a8c6;
   font-size: 0.72rem;
+  line-height: 1.4;
 }
 
 .app-view-switch {
@@ -174,6 +190,7 @@ input:focus-visible {
 
 .app-topbar-metrics {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -185,7 +202,7 @@ input:focus-visible {
   background: rgba(14, 26, 43, 0.72);
   color: #eef8ff;
   border-radius: 12px;
-  padding: 6px 10px;
+  padding: 7px 10px;
 }
 
 .app-topbar-metric-mark {
@@ -221,6 +238,7 @@ input:focus-visible {
 
 .app-topbar-controls {
   display: flex;
+  margin-left: auto;
   gap: 8px;
 }
 
@@ -230,6 +248,41 @@ input:focus-visible {
   background: rgba(15, 23, 42, 0.72);
   color: #eef8ff;
   padding: 8px 12px;
+}
+
+.app-topbar-controls button.active {
+  border-color: rgba(52, 211, 153, 0.42);
+  background: rgba(15, 143, 109, 0.2);
+  color: #dffcf3;
+}
+
+.app-topbar-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  flex: 1;
+  min-width: 260px;
+}
+
+.app-status-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(15, 143, 109, 0.16);
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  color: #81ecc8;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.app-status-copy {
+  color: var(--ls-text-secondary);
+  font-size: 0.76rem;
 }
 
 .chat-stage {
@@ -285,35 +338,63 @@ input:focus-visible {
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
-.chat-brand-block {
+.chat-stage-context {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-stage-eyebrow {
+  color: var(--ls-accent-teal);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chat-stage-title-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
-.chat-brand-block h2,
+.chat-stage-context h2,
 .assistant-welcome h3,
 .quick-start-block h4,
 .suggestion-block h4 {
   margin: 0;
 }
 
-.chat-logo {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  color: #fff;
+.chat-stage-context h2 {
+  font-size: 0.96rem;
   font-weight: 700;
-  font-size: 0.72rem;
-  background: radial-gradient(circle at 30% 30%, #e6fff7 0%, #c9f7e8 18%, #0f8f6d 18%, #0b6b52 100%);
+  letter-spacing: 0.01em;
+  color: var(--ls-text-primary);
 }
 
-.chat-brand-block p {
-  margin: 2px 0 0;
-  color: #94a8c6;
-  font-size: 0.74rem;
+.chat-stage-context p {
+  margin: 0;
+  color: var(--ls-text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.chat-stage-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 50px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(15, 143, 109, 0.16);
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  color: #88efd0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .chat-controls {
@@ -400,10 +481,12 @@ input:focus-visible {
 
 .assistant-welcome {
   text-align: center;
-  padding: 26px 20px 16px;
+  padding: 30px 24px 20px;
   border-radius: 18px;
   border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(15, 23, 42, 0.6);
+  background:
+    radial-gradient(circle at top, rgba(52, 211, 153, 0.14), transparent 40%),
+    rgba(15, 23, 42, 0.64);
 }
 
 .assistant-welcome-mark {
@@ -419,9 +502,19 @@ input:focus-visible {
   font-size: 1.2rem;
 }
 
+.assistant-welcome-eyebrow {
+  display: inline-flex;
+  margin-bottom: 10px;
+  color: #7fe9c9;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .assistant-welcome h3 {
   color: #eef8ff;
-  font-size: 1.15rem;
+  font-size: 1.2rem;
   font-weight: 700;
 }
 
@@ -722,52 +815,83 @@ input:focus-visible {
   margin-top: 4px;
 }
 
-.quick-start-block h4 {
-  margin-bottom: 8px;
+.section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.section-heading.compact {
+  align-items: center;
+}
+
+.section-heading h4 {
   color: #4fd8ac;
   font-size: 0.9rem;
   font-weight: 700;
+  margin: 0;
+}
+
+.section-heading p {
+  margin: 0;
+  color: var(--ls-text-secondary);
+  font-size: 0.76rem;
 }
 
 .quick-start-list {
-  display: flex;
-  flex-direction: column;
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(15, 23, 42, 0.6);
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .quick-start-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  padding: 13px 14px;
+  padding: 16px;
   text-align: left;
-  border: none;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.6);
   color: #dbe8fa;
-  transition: background-color 0.15s ease;
-}
-
-.quick-start-row:last-child {
-  border-bottom: none;
+  transition: transform 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .quick-start-row:hover {
   background: rgba(15, 143, 109, 0.12);
+  border-color: rgba(52, 211, 153, 0.24);
+  transform: translateY(-1px);
+}
+
+.quick-start-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
 }
 
 .quick-start-label {
-  flex: 1;
   font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.quick-start-description {
+  color: var(--ls-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 .quick-start-icon {
-  width: 20px;
+  width: 24px;
+  height: 24px;
   display: inline-grid;
   place-items: center;
+  border-radius: 8px;
+  background: rgba(52, 211, 153, 0.12);
+  color: #7fe9c9;
 }
 
 .quick-start-chevron {
@@ -780,7 +904,6 @@ input:focus-visible {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: 8px;
 }
 
 .suggestion-row {
@@ -798,6 +921,11 @@ input:focus-visible {
   padding: 8px 12px;
   font-size: 0.74rem;
   text-align: left;
+}
+
+.suggestion-pill:hover {
+  background: rgba(15, 143, 109, 0.14);
+  border-color: rgba(52, 211, 153, 0.24);
 }
 
 .composer-shell {
@@ -823,6 +951,10 @@ input:focus-visible {
   color: #eef4ff;
 }
 
+.composer-input-wrap input::placeholder {
+  color: #7d92ad;
+}
+
 .composer-counter {
   position: absolute;
   right: 14px;
@@ -834,23 +966,38 @@ input:focus-visible {
 }
 
 .composer-shell button {
-  width: 44px;
+  min-width: 88px;
   height: 44px;
   border: none;
   border-radius: 12px;
   background: linear-gradient(135deg, #0f8f6d 0%, #24b394 100%);
   color: white;
-  font-size: 1.05rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.composer-shell button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 @media (max-width: 1100px) {
-  .app-topbar {
+  .app-topbar-primary,
+  .app-topbar-secondary {
     flex-direction: column;
     align-items: stretch;
   }
 
   .app-topbar-nav {
     min-width: 0;
+  }
+
+  .app-topbar-controls {
+    margin-left: 0;
+  }
+
+  .quick-start-list {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -861,6 +1008,12 @@ input:focus-visible {
 
   .app-topbar-metrics {
     flex-wrap: wrap;
+  }
+
+  .section-heading,
+  .section-heading.compact {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .chat-controls {

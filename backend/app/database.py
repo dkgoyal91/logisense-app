@@ -42,7 +42,7 @@ def _generate_opportunities() -> list[dict[str, Any]]:
         'Crimson Estates',
         'BluePeak Housing',
     ]
-    job_directors = [
+    operations_leads = [
         'James Harris',
         'Andrew Parling',
         'Rupert Driver',
@@ -52,7 +52,7 @@ def _generate_opportunities() -> list[dict[str, Any]]:
         'Michael Turner',
         'Priya Nair',
     ]
-    owners = [
+    logistics_owners = [
         'Anju Munjal',
         'Swati Jadhav',
         'Ailish Humphries-Griffiths',
@@ -67,24 +67,24 @@ def _generate_opportunities() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for index in range(1, 621):
         client_name = client_names[(index - 1) % len(client_names)]
-        job_director = job_directors[(index - 1) % len(job_directors)]
-        owner = owners[(index - 1) % len(owners)]
+        operations_lead = operations_leads[(index - 1) % len(operations_leads)]
+        logistics_owner = logistics_owners[(index - 1) % len(logistics_owners)]
         region = regions[(index - 1) % len(regions)]
         status = stages[(index - 1) % len(stages)]
-        number_of_properties = 8 + ((index * 13) % 211)
+        route_count = 8 + ((index * 13) % 211)
         value_usd = 150000 + (index * 18750)
-        valuation_year = 2024 + (index % 3)
+        review_year = 2024 + (index % 3)
         month = 1 + ((index * 3) % 12)
         day = 1 + ((index * 7) % 27)
-        valuation_date = f'{valuation_year}-{month:02d}-{day:02d}'
+        review_date = f'{review_year}-{month:02d}-{day:02d}'
         rows.append(
             {
-                'salesforce_number': f'SF-{24000 + index}',
+                'pipeline_ref': f'SF-{24000 + index}',
                 'client_name': client_name,
-                'job_director': job_director,
-                'opportunity_owner': owner,
-                'number_of_properties': number_of_properties,
-                'valuation_date': valuation_date,
+                'operations_lead': operations_lead,
+                'logistics_owner': logistics_owner,
+                'route_count': route_count,
+                'review_date': review_date,
                 'status': status,
                 'region': region,
                 'value_usd': value_usd,
@@ -195,7 +195,15 @@ def load_table_cache() -> dict[str, list[dict[str, Any]]]:
     cache_path = _resolve_table_cache_path()
     if cache_path.exists():
         with cache_path.open('r', encoding='utf-8') as handle:
-            return json.load(handle)
+            cache = json.load(handle)
+
+        opportunities_rows = cache.get('opportunities', [])
+        if opportunities_rows and not any('pipeline_ref' in row for row in opportunities_rows[:1]):
+            cache = _build_table_cache()
+            with cache_path.open('w', encoding='utf-8') as handle:
+                json.dump(cache, handle, indent=2)
+            return cache
+        return cache
 
     cache = _build_table_cache()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -208,22 +216,22 @@ def _seed_opportunities(connection: sqlite3.Connection, rows: list[dict[str, Any
     connection.executemany(
         """
         INSERT INTO opportunities (
-            salesforce_number,
+            pipeline_ref,
             client_name,
-            job_director,
-            opportunity_owner,
-            number_of_properties,
-            valuation_date,
+            operations_lead,
+            logistics_owner,
+            route_count,
+            review_date,
             status,
             region,
             value_usd
         ) VALUES (
-            :salesforce_number,
+            :pipeline_ref,
             :client_name,
-            :job_director,
-            :opportunity_owner,
-            :number_of_properties,
-            :valuation_date,
+            :operations_lead,
+            :logistics_owner,
+            :route_count,
+            :review_date,
             :status,
             :region,
             :value_usd
@@ -317,22 +325,63 @@ def initialize_database() -> None:
     database_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database_path)
     try:
+        legacy_table_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'opportunities'"
+        ).fetchone() is not None
+
+        if legacy_table_exists:
+            legacy_columns = {row[1] for row in connection.execute('PRAGMA table_info(opportunities)').fetchall()}
+            if legacy_columns & {'job_director', 'opportunity_owner', 'salesforce_number', 'valuation_date', 'number_of_properties'}:
+                connection.execute('ALTER TABLE opportunities RENAME TO opportunities_legacy')
+
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS opportunities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                salesforce_number TEXT UNIQUE NOT NULL,
+                pipeline_ref TEXT UNIQUE NOT NULL,
                 client_name TEXT NOT NULL,
-                job_director TEXT NOT NULL,
-                opportunity_owner TEXT NOT NULL,
-                number_of_properties INTEGER NOT NULL,
-                valuation_date TEXT NOT NULL,
+                operations_lead TEXT NOT NULL,
+                logistics_owner TEXT NOT NULL,
+                route_count INTEGER NOT NULL,
+                review_date TEXT NOT NULL,
                 status TEXT NOT NULL,
                 region TEXT NOT NULL,
                 value_usd INTEGER NOT NULL
             )
             """
         )
+
+        if legacy_table_exists and connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'opportunities_legacy'"
+        ).fetchone() is not None:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO opportunities (
+                    pipeline_ref,
+                    client_name,
+                    operations_lead,
+                    logistics_owner,
+                    route_count,
+                    review_date,
+                    status,
+                    region,
+                    value_usd
+                )
+                SELECT
+                    salesforce_number,
+                    client_name,
+                    job_director,
+                    opportunity_owner,
+                    number_of_properties,
+                    valuation_date,
+                    status,
+                    region,
+                    value_usd
+                FROM opportunities_legacy
+                """
+            )
+            connection.execute('DROP TABLE opportunities_legacy')
+
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS jobs (

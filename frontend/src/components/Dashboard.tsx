@@ -37,10 +37,10 @@ type FilterOptionsResponse = {
 }
 
 const DASHBOARD_TABLES: DashboardTableMeta[] = [
-  { id: 'opportunities', label: 'Opportunities' },
-  { id: 'jobs', label: 'Jobs' },
+  { id: 'opportunities', label: 'Logistics Pipeline' },
+  { id: 'jobs', label: 'Work Orders' },
   { id: 'shipments', label: 'Shipments' },
-  { id: 'vehicles', label: 'Vehicles' },
+  { id: 'vehicles', label: 'Fleet' },
 ]
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100]
@@ -190,8 +190,8 @@ export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
 
   const kpiCards = kpis
     ? [
-        { label: 'Active Opportunities', value: formatCompact(kpis.active_opportunities) },
-        { label: 'Open Jobs', value: formatCompact(kpis.open_jobs) },
+        { label: 'Active Logistics Pipeline', value: formatCompact(kpis.active_opportunities) },
+        { label: 'Open Work Orders', value: formatCompact(kpis.open_jobs) },
         { label: 'Active Shipments', value: formatCompact(kpis.active_shipments) },
         { label: 'Delayed Shipments', value: formatCompact(kpis.delayed_shipments) },
         { label: 'Fleet Utilization', value: `${kpis.fleet_utilization_avg}%` },

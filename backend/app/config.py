@@ -12,7 +12,7 @@ class Settings(BaseSettings):
         extra='ignore',
     )
 
-    app_name: str = 'LogiSense AI Copilot'
+    app_name: str = 'LogiSense Logistics Copilot'
     debug: bool = False
     database_path: str = 'data/logisense.db'
     row_limit: int = 20

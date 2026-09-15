@@ -81,25 +81,25 @@ type PromptAction = {
 }
 
 const tabs: ModuleTab[] = [
-  { id: 'freight', label: 'Active Freight & Hubs', table: 'shipments', limit: 50, helperPrompt: 'Show latest freight and hub records.' },
-  { id: 'fleet', label: 'Fleet Telemetry', table: 'vehicles', limit: 50, helperPrompt: 'Show current fleet utilization and maintenance data.' },
-  { id: 'routes', label: 'Route Optimization', table: 'shipments', limit: 50, helperPrompt: 'Show route-level shipment data for planning.' },
-  { id: 'incidents', label: 'Incident Exceptions', table: 'shipments', limit: 50, helperPrompt: 'Show delayed and exception shipment records.' },
-  { id: 'analytics', label: 'Analytics & KPIs', table: 'jobs', limit: 50, helperPrompt: 'Show open jobs and KPI-supporting records.' },
-  { id: 'config', label: 'System Config', table: 'opportunities', limit: 50, helperPrompt: 'Show client and opportunity configuration context.' },
+  { id: 'freight', label: 'Active Freight & Hubs', table: 'shipments', limit: 50, helperPrompt: 'Show latest freight movements and hub activity.' },
+  { id: 'fleet', label: 'Fleet Telemetry', table: 'vehicles', limit: 50, helperPrompt: 'Show current fleet utilization and maintenance status.' },
+  { id: 'routes', label: 'Route Optimization', table: 'shipments', limit: 50, helperPrompt: 'Show route-level shipment performance for planning.' },
+  { id: 'incidents', label: 'Delay Exceptions', table: 'shipments', limit: 50, helperPrompt: 'Show delayed and exception shipment records.' },
+  { id: 'analytics', label: 'Operations KPIs', table: 'jobs', limit: 50, helperPrompt: 'Show open work orders and KPI-supporting logistics records.' },
+  { id: 'config', label: 'Logistics Pipeline', table: 'opportunities', limit: 50, helperPrompt: 'Show client and logistics pipeline context.' },
 ]
 
 const quickStartActions: PromptAction[] = [
-  { label: 'Show opportunities with valuation dates in 2025', prompt: 'Show opportunities with valuation dates in 2025' },
+  { label: 'Show logistics pipeline records with valuation dates in 2025', prompt: 'Show logistics pipeline records with valuation dates in 2025' },
   { label: 'Show delayed shipments by delivery date', prompt: 'Show delayed shipments by delivery date' },
-  { label: 'Show open jobs sorted by days open', prompt: 'Show open jobs sorted by days open' },
+  { label: 'Show open work orders sorted by days open', prompt: 'Show open work orders sorted by days open' },
 ]
 
 const suggestedPrompts: PromptAction[] = [
   { label: 'Show delayed shipments for Birmingham routes', prompt: 'Show delayed shipments for Birmingham routes' },
-  { label: 'Which routes have the highest delivery risk?', prompt: 'Which routes have the highest delivery risk?' },
+  { label: 'Which logistics routes have the highest delivery risk?', prompt: 'Which logistics routes have the highest delivery risk?' },
   { label: 'List fleet vehicles in maintenance status', prompt: 'List fleet vehicles in maintenance status' },
-  { label: 'Show open jobs with highest days open', prompt: 'Show open jobs with highest days open' },
+  { label: 'Show open work orders with highest days open', prompt: 'Show open work orders with highest days open' },
 ]
 
 // Defense-in-depth: the LLM is instructed to avoid markdown, but strip any raw pipe-table
@@ -209,7 +209,7 @@ const buildContextualPrompts = (rows: Record<string, unknown>[], table: string |
 
 const initialAssistantMessage: ChatMessage = {
   role: 'assistant',
-  text: 'Live operations online. Click any module tab or quick prompt to fetch real data from the logistics database.',
+  text: 'Logistics operations are live. Click a module or quick prompt to inspect fleet, shipment, and route data end to end.',
 }
 
 function App() {
@@ -274,10 +274,10 @@ function App() {
     },
     {
       id: 'opportunities',
-      label: 'Opps',
+      label: 'Pipeline',
       value: dashboard ? formatCompact(dashboard.kpis.active_opportunities) : '...',
-      detail: 'Active pipeline',
-      icon: 'O',
+      detail: 'Active logistics pipeline',
+      icon: 'P',
     },
   ]
 
@@ -494,8 +494,8 @@ function App() {
         <div className="app-topbar-brand">
           <div className="app-topbar-logo" aria-hidden="true">LS</div>
           <div className="app-topbar-copy">
-            <span className="app-topbar-title">LogiSense Copilot</span>
-            <span className="app-topbar-subtitle">Enterprise logistics assistant</span>
+            <span className="app-topbar-title">LogiSense Logistics Copilot</span>
+            <span className="app-topbar-subtitle">End-to-end logistics intelligence</span>
           </div>
         </div>
 
@@ -580,8 +580,8 @@ function App() {
               <span>LS</span>
             </div>
             <div>
-              <h2>LogiSense AI</h2>
-              <p>Your intelligent assistant</p>
+              <h2>LogiSense Logistics AI</h2>
+              <p>Your end-to-end logistics assistant</p>
             </div>
           </div>
 
@@ -637,7 +637,7 @@ function App() {
             <div className="assistant-welcome">
               <div className="assistant-welcome-mark">LS</div>
               <h3>Welcome back, Dinesh! 👋</h3>
-              <p>I'm here to help you find insights, analyze data, and answer questions about your logistics operations.</p>
+              <p>I'm here to help you track shipments, monitor fleet performance, and answer questions across your logistics operations.</p>
             </div>
           ) : null}
 
@@ -770,7 +770,7 @@ function App() {
                     <div className="chat-bubble-row assistant">
                       <div className="chat-bubble thinking">
                         <span className="thinking-indicator" />
-                        LogiSense AI is thinking...
+                        LogiSense logistics AI is thinking...
                       </div>
                     </div>
                   )}
@@ -809,7 +809,7 @@ function App() {
                       value={draft}
                       maxLength={1500}
                       aria-label="Ask logistics copilot"
-                      placeholder="Ask me anything about your projects..."
+                      placeholder="Ask about shipments, fleet, routes, or warehouse operations..."
                       onChange={(event) => setDraft(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {

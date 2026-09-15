@@ -9,12 +9,12 @@ from app.database import get_connection
 
 ALLOWED_TABLES: dict[str, set[str]] = {
     'opportunities': {
-        'salesforce_number',
+        'pipeline_ref',
         'client_name',
-        'job_director',
-        'opportunity_owner',
-        'number_of_properties',
-        'valuation_date',
+        'operations_lead',
+        'logistics_owner',
+        'route_count',
+        'review_date',
         'status',
         'region',
         'value_usd',
@@ -51,7 +51,7 @@ ALLOWED_TABLES: dict[str, set[str]] = {
 }
 
 TABLE_DEFAULT_ORDER: dict[str, str] = {
-    'opportunities': 'valuation_date DESC',
+    'opportunities': 'review_date DESC',
     'jobs': 'days_open DESC',
     'shipments': 'delivery_date DESC',
     'vehicles': 'utilization_pct DESC',
@@ -112,7 +112,7 @@ def _attach_coordinates(table_name: str, rows: list[dict[str, Any]]) -> list[dic
 
 
 def _extract_name(message: str) -> str | None:
-    match = re.search(r"(?:managed by|job director|owned by|owner is|by\s+)([A-Z][A-Za-z' .-]+)", message, re.IGNORECASE)
+    match = re.search(r"(?:managed by|operations lead|logistics owner|owned by|owner is|by\s+)([A-Z][A-Za-z' .-]+)", message, re.IGNORECASE)
     if not match:
         return None
     name = match.group(1).strip()
@@ -125,32 +125,32 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
     params: list[Any] = []
 
     if table_name == 'opportunities':
-        if 'managed by' in lower_message or 'job director' in lower_message:
+        if 'managed by' in lower_message or 'operations lead' in lower_message or 'job director' in lower_message:
             name = _extract_name(message)
             if name:
                 return (
-                    f"SELECT {columns} FROM opportunities WHERE job_director = ? ORDER BY valuation_date DESC LIMIT ?",
+                    f"SELECT {columns} FROM opportunities WHERE operations_lead = ? ORDER BY review_date DESC LIMIT ?",
                     [name, settings.row_limit],
                 )
-        if 'owner' in lower_message and 'opportunity_owner' in lower_message:
+        if 'owner' in lower_message and ('logistics_owner' in lower_message or 'opportunity_owner' in lower_message):
             name = _extract_name(message)
             if name:
                 return (
-                    f"SELECT {columns} FROM opportunities WHERE opportunity_owner = ? ORDER BY valuation_date DESC LIMIT ?",
+                    f"SELECT {columns} FROM opportunities WHERE logistics_owner = ? ORDER BY review_date DESC LIMIT ?",
                     [name, settings.row_limit],
                 )
-        if '2025' in lower_message or 'valuation date in 2025' in lower_message:
+        if '2025' in lower_message or 'review date in 2025' in lower_message or 'valuation date in 2025' in lower_message:
             return (
-                f"SELECT {columns} FROM opportunities WHERE valuation_date LIKE ? ORDER BY valuation_date DESC LIMIT ?",
+                f"SELECT {columns} FROM opportunities WHERE review_date LIKE ? ORDER BY review_date DESC LIMIT ?",
                 ['2025%', settings.row_limit],
             )
         if 'test client uk uat1' in lower_message or 'test client' in lower_message:
             return (
-                f"SELECT {columns} FROM opportunities WHERE client_name LIKE ? ORDER BY valuation_date DESC LIMIT ?",
+                f"SELECT {columns} FROM opportunities WHERE client_name LIKE ? ORDER BY review_date DESC LIMIT ?",
                 ['%Test Client%', settings.row_limit],
             )
         return (
-            f"SELECT {columns} FROM opportunities ORDER BY valuation_date DESC LIMIT ?",
+            f"SELECT {columns} FROM opportunities ORDER BY review_date DESC LIMIT ?",
             [settings.row_limit],
         )
 
@@ -210,9 +210,9 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
 
 def detect_table_from_message(message: str) -> str | None:
     lower_message = message.lower()
-    if any(term in lower_message for term in ['opportunity', 'opportunities', 'projects', 'client', 'valuation', 'job director', 'salesforce', 'properties']):
+    if any(term in lower_message for term in ['pipeline', 'logistics pipeline', 'opportunity', 'opportunities', 'projects', 'client', 'valuation', 'review date', 'operations lead', 'logistics owner', 'salesforce', 'properties', 'route count']):
         return 'opportunities'
-    if any(term in lower_message for term in ['job', 'jobs', 'stage', 'progress', 'days open', 'current stage']):
+    if any(term in lower_message for term in ['job', 'jobs', 'work order', 'work orders', 'stage', 'progress', 'days open', 'current stage']):
         return 'jobs'
     if any(term in lower_message for term in ['shipment', 'shipments', 'delivery', 'route', 'origin', 'destination', 'cargo']):
         return 'shipments'

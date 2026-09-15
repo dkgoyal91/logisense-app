@@ -1,4 +1,22 @@
 :root {
+  /* LogiSense AI design tokens — dark navy base with teal/green + blue accents */
+  --ls-bg-canvas: #06111f;
+  --ls-bg-panel: rgba(9, 19, 33, 0.9);
+  --ls-bg-panel-soft: rgba(15, 23, 42, 0.6);
+  --ls-bg-raised: rgba(14, 26, 43, 0.72);
+  --ls-border-subtle: rgba(148, 163, 184, 0.16);
+  --ls-border-strong: rgba(148, 163, 184, 0.3);
+  --ls-accent-teal: #34d399;
+  --ls-accent-teal-strong: #0f8f6d;
+  --ls-accent-blue: #3b82f6;
+  --ls-text-primary: #eef8ff;
+  --ls-text-secondary: #9db3d7;
+  --ls-text-muted: #7d92ad;
+  --ls-radius-lg: 18px;
+  --ls-radius-md: 12px;
+  --ls-radius-sm: 8px;
+  --ls-shadow-panel: 0 18px 50px rgba(2, 6, 23, 0.26);
+
   color: #e6f1ff;
   background: #07111f;
   font-synthesis: none;
@@ -101,6 +119,32 @@ input:focus-visible {
   font-size: 0.72rem;
 }
 
+.app-view-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--ls-border-subtle);
+}
+
+.app-view-switch-item {
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ls-text-secondary);
+  padding: 8px 18px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.app-view-switch-item.active {
+  background: linear-gradient(135deg, var(--ls-accent-teal-strong) 0%, #24b394 100%);
+  color: #ffffff;
+  box-shadow: 0 6px 16px rgba(15, 143, 109, 0.32);
+}
+
 .app-topbar-nav {
   display: flex;
   flex-wrap: wrap;
@@ -199,6 +243,11 @@ input:focus-visible {
   background: rgba(9, 19, 33, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.14);
   box-shadow: 0 18px 50px rgba(2, 6, 23, 0.26);
+}
+
+.dashboard-stage {
+  padding: 18px 20px;
+  overflow: auto;
 }
 
 .chat-result-body table {

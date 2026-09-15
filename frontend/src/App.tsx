@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { ResultChart, ResultMap } from './components/ResultVisuals'
+import { Dashboard } from './components/Dashboard'
+import { formatCellValue, formatCompact } from './utils/format'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 
@@ -99,21 +101,6 @@ const suggestedPrompts: PromptAction[] = [
   { label: 'List fleet vehicles in maintenance status', prompt: 'List fleet vehicles in maintenance status' },
   { label: 'Show open jobs with highest days open', prompt: 'Show open jobs with highest days open' },
 ]
-
-const formatCompact = (value: number): string =>
-  new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
-
-const formatCellValue = (value: unknown): string => {
-  if (value === null || value === undefined) {
-    return '—'
-  }
-
-  if (typeof value === 'number') {
-    return new Intl.NumberFormat('en-GB').format(value)
-  }
-
-  return String(value)
-}
 
 // Defense-in-depth: the LLM is instructed to avoid markdown, but strip any raw pipe-table
 // syntax it still emits, since the matching rows already render as a real table below.
@@ -240,6 +227,7 @@ function App() {
   const [selectedTabId, setSelectedTabId] = useState<string>(tabs[0].id)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [isChatMenuOpen, setIsChatMenuOpen] = useState(false)
+  const [activeView, setActiveView] = useState<'chat' | 'dashboard'>('chat')
 
   const selectedTab = tabs.find((item) => item.id === selectedTabId) ?? tabs[0]
   const activeSession = chatSessions.find((session) => session.id === activeSessionId) ?? chatSessions[0]
@@ -511,20 +499,43 @@ function App() {
           </div>
         </div>
 
-        <nav className="app-topbar-nav" aria-label="Operations modules">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              className={`app-topbar-nav-item ${tab.id === selectedTabId ? 'active' : ''}`}
-              onClick={() => void handleTabClick(tab)}
-              aria-label={tab.label}
-              title={tab.helperPrompt}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
+        <div className="app-view-switch" role="tablist" aria-label="Primary view">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeView === 'chat'}
+            className={`app-view-switch-item ${activeView === 'chat' ? 'active' : ''}`}
+            onClick={() => setActiveView('chat')}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeView === 'dashboard'}
+            className={`app-view-switch-item ${activeView === 'dashboard' ? 'active' : ''}`}
+            onClick={() => setActiveView('dashboard')}
+          >
+            Dashboard
+          </button>
+        </div>
+
+        {activeView === 'chat' ? (
+          <nav className="app-topbar-nav" aria-label="Operations modules">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`app-topbar-nav-item ${tab.id === selectedTabId ? 'active' : ''}`}
+                onClick={() => void handleTabClick(tab)}
+                aria-label={tab.label}
+                title={tab.helperPrompt}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        ) : null}
 
         <div className="app-topbar-metrics" aria-label="Quick metrics">
           {quickMetrics.map((metric) => (
@@ -532,7 +543,10 @@ function App() {
               key={metric.id}
               type="button"
               className="app-topbar-metric"
-              onClick={() => handleIconClick(metric.id)}
+              onClick={() => {
+                setActiveView('chat')
+                handleIconClick(metric.id)
+              }}
               aria-label={`${metric.label} quick metric`}
             >
               <span className="app-topbar-metric-mark">{metric.icon}</span>
@@ -554,6 +568,11 @@ function App() {
         </div>
       </header>
 
+      {activeView === 'dashboard' ? (
+        <main className="chat-stage dashboard-stage">
+          <Dashboard apiBaseUrl={apiBaseUrl} />
+        </main>
+      ) : (
       <main className="chat-stage">
         <header className="chat-stage-header">
           <div className="chat-brand-block">
@@ -805,6 +824,7 @@ function App() {
                   </button>
                 </div>
               </main>
+      )}
             </div>
   )
 }

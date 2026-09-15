@@ -57,6 +57,16 @@ TABLE_DEFAULT_ORDER: dict[str, str] = {
     'vehicles': 'utilization_pct DESC',
 }
 
+# Columns exposed as dashboard filter dropdowns, restricted to low-cardinality categorical fields.
+FILTERABLE_COLUMNS: dict[str, list[str]] = {
+    'opportunities': ['status', 'region'],
+    'jobs': ['status', 'region', 'current_stage'],
+    'shipments': ['status', 'origin', 'destination'],
+    'vehicles': ['status', 'depot'],
+}
+
+MAX_PAGE_SIZE = 200
+
 # Approximate UK city centroids used to plot map markers for location-bearing rows.
 CITY_COORDINATES: dict[str, tuple[float, float]] = {
     'london': (51.5072, -0.1276),
@@ -292,24 +302,82 @@ def get_dashboard_snapshot() -> dict[str, Any]:
     }
 
 
-def get_live_table_rows(table_name: str, limit: int) -> dict[str, Any]:
+def get_live_table_rows(
+    table_name: str,
+    page: int = 1,
+    page_size: int = 50,
+    search: str | None = None,
+    filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Fetch one page of a dashboard table, optionally narrowed by free-text search and column filters.
+
+    Search and filter columns are always validated against ALLOWED_TABLES before being
+    interpolated into SQL — values are never concatenated, only bound as parameters.
+    """
     safe_table = table_name.lower().strip()
     if safe_table not in ALLOWED_TABLES:
         raise ValueError(f'Table {safe_table} is not allowed.')
 
-    safe_limit = max(1, min(limit, 200))
-    columns = ', '.join(sorted(ALLOWED_TABLES[safe_table]))
+    allowed_columns = ALLOWED_TABLES[safe_table]
+    safe_page = max(1, page)
+    safe_page_size = max(1, min(page_size, MAX_PAGE_SIZE))
+    sorted_columns = sorted(allowed_columns)
+    columns = ', '.join(sorted_columns)
     order_clause = TABLE_DEFAULT_ORDER[safe_table]
-    sql = f'SELECT {columns} FROM {safe_table} ORDER BY {order_clause} LIMIT ?'
+
+    where_clauses: list[str] = []
+    params: list[Any] = []
+
+    search_term = (search or '').strip()
+    if search_term:
+        like_term = f'%{search_term}%'
+        search_conditions = [f'CAST({column} AS TEXT) LIKE ?' for column in sorted_columns]
+        where_clauses.append('(' + ' OR '.join(search_conditions) + ')')
+        params.extend([like_term] * len(search_conditions))
+
+    for column, value in (filters or {}).items():
+        if column not in allowed_columns:
+            raise ValueError(f'Filter column {column} is not allowed for {safe_table}.')
+        if value in (None, ''):
+            continue
+        where_clauses.append(f'{column} = ?')
+        params.append(value)
+
+    where_sql = f' WHERE {" AND ".join(where_clauses)}' if where_clauses else ''
 
     with get_connection() as connection:
-        cursor = connection.execute(sql, [safe_limit])
+        total = connection.execute(f'SELECT COUNT(*) FROM {safe_table}{where_sql}', params).fetchone()[0]
+        offset = (safe_page - 1) * safe_page_size
+        sql = f'SELECT {columns} FROM {safe_table}{where_sql} ORDER BY {order_clause} LIMIT ? OFFSET ?'
+        cursor = connection.execute(sql, [*params, safe_page_size, offset])
         rows = [dict(row) for row in cursor.fetchall()]
 
     rows = _attach_coordinates(safe_table, rows)
+    total_pages = max(1, -(-total // safe_page_size)) if total else 1
 
     return {
         'table': safe_table,
         'rows': rows,
-        'summary': f'Fetched {len(rows)} records from {safe_table}.',
+        'summary': f'Fetched {len(rows)} of {total} records from {safe_table}.',
+        'page': safe_page,
+        'page_size': safe_page_size,
+        'total': total,
+        'total_pages': total_pages,
     }
+
+
+def get_filter_options(table_name: str) -> dict[str, list[Any]]:
+    """Return distinct values for each dashboard-filterable column, for building filter dropdowns."""
+    safe_table = table_name.lower().strip()
+    if safe_table not in ALLOWED_TABLES:
+        raise ValueError(f'Table {safe_table} is not allowed.')
+
+    options: dict[str, list[Any]] = {}
+    with get_connection() as connection:
+        for column in FILTERABLE_COLUMNS.get(safe_table, []):
+            rows = connection.execute(
+                f'SELECT DISTINCT {column} FROM {safe_table} WHERE {column} IS NOT NULL ORDER BY {column}'
+            ).fetchall()
+            options[column] = [row[0] for row in rows]
+
+    return options

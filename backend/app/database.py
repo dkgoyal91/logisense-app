@@ -65,7 +65,7 @@ def _generate_opportunities() -> list[dict[str, Any]]:
     stages = ['In Progress', 'Due to close', 'Portfolio review', 'Awaiting data', 'On hold']
 
     rows: list[dict[str, Any]] = []
-    for index in range(1, 431):
+    for index in range(1, 621):
         client_name = client_names[(index - 1) % len(client_names)]
         job_director = job_directors[(index - 1) % len(job_directors)]
         owner = owners[(index - 1) % len(owners)]
@@ -106,7 +106,7 @@ def _generate_jobs() -> list[dict[str, Any]]:
         'Westfield Capital',
     ]
     rows: list[dict[str, Any]] = []
-    for index in range(1, 281):
+    for index in range(1, 561):
         client_name = client_names[(index - 1) % len(client_names)]
         opportunity_ref = f'SF-{24000 + index}'
         region = regions[(index - 1) % len(regions)]
@@ -136,7 +136,7 @@ def _generate_shipments() -> list[dict[str, Any]]:
     routes = ['Southampton -> Birmingham', 'Leeds -> London', 'Manchester -> Bristol', 'Birmingham -> Glasgow', 'London -> Edinburgh', 'Leeds -> Manchester']
     statuses = ['In transit', 'Delayed', 'Delivered', 'Exception', 'Planned']
     rows: list[dict[str, Any]] = []
-    for index in range(1, 521):
+    for index in range(1, 661):
         customer = customers[(index - 1) % len(customers)]
         origin, destination = routes[(index - 1) % len(routes)].split(' -> ')
         status = statuses[(index - 1) % len(statuses)]
@@ -163,7 +163,7 @@ def _generate_vehicles() -> list[dict[str, Any]]:
     depots = ['London Central', 'Manchester North', 'Birmingham Yard', 'Leeds Depot', 'Glasgow Hub']
     statuses = ['Available', 'In use', 'Maintenance', 'Idle']
     rows: list[dict[str, Any]] = []
-    for index in range(1, 96):
+    for index in range(1, 541):
         depot = depots[(index - 1) % len(depots)]
         status = statuses[(index - 1) % len(statuses)]
         utilization = 36 + ((index * 7) % 64)
@@ -379,10 +379,10 @@ def initialize_database() -> None:
         )
 
         minimum_targets = {
-            'opportunities': 430,
-            'jobs': 280,
-            'shipments': 520,
-            'vehicles': 95,
+            'opportunities': 620,
+            'jobs': 560,
+            'shipments': 660,
+            'vehicles': 540,
         }
         current_counts = {
             table: connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]

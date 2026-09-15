@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,7 +9,7 @@ from pydantic import BaseModel
 from app.chat_agent import process_chat_turn
 from app.config import settings
 from app.database import initialize_database
-from app.sql_service import get_dashboard_snapshot, get_live_table_rows
+from app.sql_service import get_dashboard_snapshot, get_filter_options, get_live_table_rows
 
 app = FastAPI(title=settings.app_name, version='0.1.0')
 
@@ -67,9 +69,33 @@ def dashboard_snapshot() -> dict[str, object]:
 
 
 @app.get('/api/live/{table_name}')
-def live_table_data(table_name: str, limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
+def live_table_data(
+    table_name: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    q: str | None = Query(default=None, max_length=200),
+    filters: str | None = Query(default=None, max_length=1000),
+) -> dict[str, object]:
+    parsed_filters: dict[str, object] = {}
+    if filters:
+        try:
+            parsed = json.loads(filters)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail='filters must be valid JSON.') from exc
+        if not isinstance(parsed, dict):
+            raise HTTPException(status_code=400, detail='filters must be a JSON object of column: value pairs.')
+        parsed_filters = parsed
+
     try:
-        return get_live_table_rows(table_name, limit)
+        return get_live_table_rows(table_name, page=page, page_size=page_size, search=q, filters=parsed_filters)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get('/api/live/{table_name}/filters')
+def live_table_filter_options(table_name: str) -> dict[str, object]:
+    try:
+        return {'table': table_name.lower().strip(), 'columns': get_filter_options(table_name)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

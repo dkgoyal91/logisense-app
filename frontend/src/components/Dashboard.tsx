@@ -37,7 +37,7 @@ type FilterOptionsResponse = {
 }
 
 const DASHBOARD_TABLES: DashboardTableMeta[] = [
-  { id: 'opportunities', label: 'Logistics Pipeline' },
+  { id: 'opportunities', label: 'Logistics Portfolio' },
   { id: 'jobs', label: 'Work Orders' },
   { id: 'shipments', label: 'Shipments' },
   { id: 'vehicles', label: 'Fleet' },
@@ -190,7 +190,7 @@ export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
 
   const kpiCards = kpis
     ? [
-        { label: 'Active Logistics Pipeline', value: formatCompact(kpis.active_opportunities) },
+        { label: 'Active Logistics Portfolio', value: formatCompact(kpis.active_opportunities) },
         { label: 'Open Work Orders', value: formatCompact(kpis.open_jobs) },
         { label: 'Active Shipments', value: formatCompact(kpis.active_shipments) },
         { label: 'Delayed Shipments', value: formatCompact(kpis.delayed_shipments) },

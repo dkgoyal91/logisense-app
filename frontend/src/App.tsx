@@ -86,11 +86,11 @@ const tabs: ModuleTab[] = [
   { id: 'routes', label: 'Route Optimization', table: 'shipments', limit: 50, helperPrompt: 'Show route-level shipment performance for planning.' },
   { id: 'incidents', label: 'Delay Exceptions', table: 'shipments', limit: 50, helperPrompt: 'Show delayed and exception shipment records.' },
   { id: 'analytics', label: 'Operations KPIs', table: 'jobs', limit: 50, helperPrompt: 'Show open work orders and KPI-supporting logistics records.' },
-  { id: 'config', label: 'Logistics Pipeline', table: 'opportunities', limit: 50, helperPrompt: 'Show client and logistics pipeline context.' },
+  { id: 'config', label: 'Logistics Portfolio', table: 'opportunities', limit: 50, helperPrompt: 'Show client and logistics portfolio context.' },
 ]
 
 const quickStartActions: PromptAction[] = [
-  { label: 'Show logistics pipeline records with valuation dates in 2025', prompt: 'Show logistics pipeline records with valuation dates in 2025' },
+  { label: 'Show logistics portfolio records with review dates in 2025', prompt: 'Show logistics portfolio records with review dates in 2025' },
   { label: 'Show delayed shipments by delivery date', prompt: 'Show delayed shipments by delivery date' },
   { label: 'Show open work orders sorted by days open', prompt: 'Show open work orders sorted by days open' },
 ]
@@ -141,19 +141,72 @@ const buildAssistantText = (data: ChatResponse): string => {
   return stripMarkdownTableSyntax(trimmed) || 'Here are the matching records.'
 }
 
-const buildPreviewSummary = (rows: Record<string, unknown>[], fallback: string): string => {
+const buildResultSummary = (rows: Record<string, unknown>[], table?: string | null, fallback = 'Result set ready'): string => {
   if (rows.length === 0) {
     return fallback
   }
 
-  const firstRow = rows[0]
-  const candidateKeys = ['client_name', 'customer', 'route', 'status', 'delivery_date', 'valuation_date']
-  const preview = candidateKeys
-    .map((key) => firstRow[key])
-    .filter((value): value is string | number => typeof value === 'string' || typeof value === 'number')
-    .map((value) => String(value))
+  const total = rows.length
+  const statusCounts = rows.reduce<Record<string, number>>((counts, row) => {
+    const status = String(row.status ?? 'unknown').trim().toLowerCase()
+    counts[status] = (counts[status] ?? 0) + 1
+    return counts
+  }, {})
 
-  return preview.length > 0 ? preview.slice(0, 3).join(' • ') : fallback
+  const delayed = statusCounts.delayed ?? 0
+  const onTime = statusCounts['on time'] ?? 0
+  const maintenance = statusCounts.maintenance ?? 0
+  const route = String(rows[0].route ?? rows[0].destination ?? rows[0].region ?? 'the selected route corridor')
+  const region = String(rows[0].region ?? rows[0].destination ?? 'the selected logistics area')
+
+  if (table === 'shipments') {
+    const delayShare = Math.round((delayed / total) * 100) || 0
+    const summarySentences = [
+      `There are ${total} shipments in view across the active logistics network.`,
+      `The current status mix shows ${delayed} delayed loads and ${onTime || total - delayed} on-time movements.`,
+      `The strongest concentration is around ${route}, which is the main corridor driving current delivery pressure.`,
+      `This means ${delayShare}% of the visible batch requires operational attention before the next dispatch window.`,
+      `Priority focus should remain on route timing, vehicle readiness, and customer communication for the delayed freight.`,
+    ]
+
+    return summarySentences.join('\n')
+  }
+
+  if (table === 'vehicles') {
+    const summarySentences = [
+      `There are ${total} vehicles in view across the active fleet.`,
+      `The fleet is generally stable, with ${maintenance} vehicles currently under maintenance or service review.`,
+      `${Math.max(total - maintenance, 0)} vehicles remain available for live operations and dispatch coverage.`,
+      `This suggests the network is operating within a manageable service window for the current demand profile.`,
+      `Monitoring utilization and maintenance turnaround should remain the main operational priority for the next cycle.`,
+    ]
+
+    return summarySentences.join('\n')
+  }
+
+  if (table === 'jobs') {
+    const open = rows.filter((row) => String(row.status ?? '').toLowerCase() !== 'completed').length
+    const longestWait = Math.max(...rows.map((row) => Number(row.days_open ?? 0)).filter((value) => Number.isFinite(value)), 0)
+    const summarySentences = [
+      `There are ${total} work orders in view across the operations backlog.`,
+      `${open} items remain active, which indicates the current workload is still concentrated in live execution.`,
+      `The longest outstanding action is waiting ${longestWait} days, highlighting the most urgent operational bottleneck.`,
+      `This points to a steady workload that is manageable but still needs proactive scheduling and escalation on the oldest orders.`,
+      `The best near-term response is to prioritize age-based execution and clear the longest open work items first.`,
+    ]
+
+    return summarySentences.join('\n')
+  }
+
+  const summarySentences = [
+    `There are ${total} logistics records in view for the current operational scope.`,
+    `The strongest activity is centered around ${region}, where most of the recent movement and planning focus is concentrated.`,
+    `This indicates the network is experiencing a meaningful level of live operational activity in the selected area.`,
+    `The key business signal is that demand remains active and distributed across the relevant routes and service nodes.`,
+    `For the next decision cycle, the most valuable follow-up is to review route-level exceptions and capacity pressure in this zone.`,
+  ]
+
+  return summarySentences.join('\n')
 }
 
 const formatTimestamp = (value?: number): string => {
@@ -166,6 +219,36 @@ const formatTimestamp = (value?: number): string => {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value))
+}
+
+const formatColumnLabel = (column: string): string => {
+  const normalized = column
+    .replace(/opportunity_ref/gi, 'pipeline_ref')
+    .replace(/salesforce_number/gi, 'pipeline_ref')
+    .replace(/job_director/gi, 'operations_lead')
+    .replace(/opportunity_owner/gi, 'logistics_owner')
+    .replace(/valuation_date/gi, 'review_date')
+    .replace(/number_of_properties/gi, 'route_count')
+    .replace(/_+/g, ' ')
+    .trim()
+
+  return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+const buildFullTableText = (rows: Record<string, unknown>[], table?: string | null): string => {
+  if (rows.length === 0) {
+    return `No ${table ? table.replace(/_/g, ' ') : 'logistics'} records available.`
+  }
+
+  const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))))
+  const header = columns.map((column) => formatColumnLabel(column)).join('\t')
+  const lines = rows.map((row) =>
+    columns
+      .map((column) => String(formatCellValue(row[column])).replace(/\t/g, ' '))
+      .join('\t'),
+  )
+
+  return [header, ...lines].join('\n')
 }
 
 // Grounded, honest trace of what the agent pipeline actually did — never invented reasoning.
@@ -274,9 +357,9 @@ function App() {
     },
     {
       id: 'opportunities',
-      label: 'Pipeline',
+      label: 'Portfolio',
       value: dashboard ? formatCompact(dashboard.kpis.active_opportunities) : '...',
-      detail: 'Active logistics pipeline',
+      detail: 'Active logistics portfolio',
       icon: 'P',
     },
   ]
@@ -464,11 +547,14 @@ function App() {
     )
   }
 
-  const handleCopyMessage = async (text: string) => {
+  const handleCopyMessage = async (rows: Record<string, unknown>[], table?: string | null, summary?: string) => {
     try {
-      await navigator.clipboard.writeText(text)
+      const content = rows.length > 0
+        ? buildFullTableText(rows, table)
+        : summary ?? 'No table data available.'
+      await navigator.clipboard.writeText(content)
     } catch (error) {
-      console.error('Unable to copy assistant response', error)
+      console.error('Unable to copy table data', error)
     }
   }
 
@@ -644,7 +730,7 @@ function App() {
           {visibleMessages.map((message, index) => {
             const rows = message.data?.rows ?? []
             const objectKeys = rows.length > 0 ? Object.keys(rows[0]) : []
-            const summaryText = message.data?.summary ?? buildPreviewSummary(rows, 'Result set ready')
+            const summaryText = message.data?.summary?.trim() || buildResultSummary(rows, message.data?.table, 'Result set ready')
             const hasRows = rows.length > 0
 
             if (message.role === 'user') {
@@ -685,7 +771,7 @@ function App() {
                                   <thead>
                                     <tr>
                                       {objectKeys.map((column) => (
-                                        <th key={column}>{column.replaceAll('_', ' ')}</th>
+                                        <th key={column}>{formatColumnLabel(column)}</th>
                                       ))}
                                     </tr>
                                   </thead>
@@ -705,7 +791,7 @@ function App() {
 
                           {hasRows ? (
                             <div className="message-action-row">
-                              <button type="button" onClick={() => void handleCopyMessage(message.text)}>
+                              <button type="button" onClick={() => void handleCopyMessage(rows, message.data?.table, message.text)}>
                                 Copy
                               </button>
                               <button type="button" onClick={() => handleRegenerateMessage(index)}>
@@ -754,11 +840,11 @@ function App() {
                             </div>
                           ) : null}
                           {hasRows && message.view === 'summary' ? (
-                            <div className="chat-visual-card">
-                              <div className="chat-visual-card-head">
+                            <div className="chat-visual-card summary-panel">
+                              <div className="chat-visual-card-head summary-head">
                                 <h4>Summary</h4>
                               </div>
-                              <p className="chat-visual-card-body">{summaryText}</p>
+                              <p className="chat-visual-card-body summary-body">{summaryText}</p>
                             </div>
                           ) : null}
                         </div>

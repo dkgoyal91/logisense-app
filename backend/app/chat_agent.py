@@ -92,9 +92,44 @@ def sql_agent(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def _build_short_summary(rows: list[dict[str, Any]], table: str | None) -> str:
+    if not rows:
+        return 'No matching logistics records were found for this query.'
+
+    if table == 'shipments':
+        delayed = sum(1 for row in rows if str(row.get('status', '')).lower() == 'delayed')
+        route_counts: dict[str, int] = {}
+        for row in rows:
+            route = str(row.get('route') or row.get('destination') or 'Unknown route')
+            route_counts[route] = route_counts.get(route, 0) + 1
+        top_route = max(route_counts.items(), key=lambda item: item[1])[0] if route_counts else 'the selected routes'
+        if delayed:
+            return f'{len(rows)} shipments are in view, with {delayed} delayed. The biggest concentration is on {top_route}.'
+        return f'{len(rows)} shipments are in view; most are tracking normally across {top_route}.'
+
+    if table == 'vehicles':
+        maintenance = sum(1 for row in rows if str(row.get('status', '')).lower() == 'maintenance')
+        if maintenance:
+            return f'{len(rows)} vehicles are in view, and {maintenance} are currently in maintenance or service attention.'
+        return f'{len(rows)} vehicles are in view; the fleet is broadly healthy with no major maintenance spikes.'
+
+    if table == 'jobs':
+        open_jobs = sum(1 for row in rows if str(row.get('status', '')).lower() != 'completed')
+        longest_wait = max((row.get('days_open', 0) for row in rows if isinstance(row.get('days_open', 0), (int, float))), default=0)
+        return f'{len(rows)} work orders are visible, with {open_jobs} still active and the longest open item waiting {longest_wait} days.'
+
+    top_region = max(
+        ((row.get('region'), 1) for row in rows if row.get('region')),
+        key=lambda item: item[1],
+        default=('the selected region', 0),
+    )[0]
+    return f'{len(rows)} logistics records are in view, with the strongest activity centered on {top_region}.'
+
+
 def summary_agent(state: dict[str, Any]) -> dict[str, Any]:
     """Phrase the final answer with the LLM, strictly grounded on the SQL agent's output."""
     state['final_response'] = state['grounded_answer']
+    state['short_summary'] = _build_short_summary(state.get('rows', []), state.get('table'))
 
     llm = build_llm()
     if llm is None or not state.get('rows'):
@@ -109,7 +144,8 @@ def summary_agent(state: dict[str, Any]) -> dict[str, Any]:
                 'numbers that are not present in the summary or sample rows. The matching records are '
                 'already rendered to the user as a data table in the UI, so respond in plain prose '
                 'sentences only: do not use markdown tables, pipe characters, bullet lists, or bold/italic '
-                'asterisks, and do not restate the raw rows.'
+                'asterisks, and do not restate the raw rows. Write a useful logistics recap in 3-5 clear '
+                'sentences that explains what is happening, what is delayed, and what should be prioritized next.'
             )
         ),
         *_history_to_messages(state.get('history', [])),
@@ -124,7 +160,10 @@ def summary_agent(state: dict[str, Any]) -> dict[str, Any]:
 
     try:
         result = llm.invoke(messages)
-        state['final_response'] = str(getattr(result, 'content', result))
+        content = str(getattr(result, 'content', result)).strip()
+        if content:
+            state['final_response'] = content
+            state['short_summary'] = content
     except Exception:
         # Keep the safe, data-grounded answer already set above.
         pass
@@ -190,11 +229,13 @@ def process_chat_turn(session_id: str, user_message: str) -> dict[str, Any]:
     conversation_store[session_id].append(f'User: {trimmed_message}')
     conversation_store[session_id].append(f'Assistant: {answer}')
 
+    short_summary = state.get('short_summary') or summary or 'No summary available.'
+
     return {
         'answer': answer,
         'table': table,
         'rows': rows,
-        'summary': summary,
+        'summary': short_summary,
         'session_id': session_id,
         'provider': settings.active_ai_provider,
         'context': list(conversation_store[session_id])[-6:],

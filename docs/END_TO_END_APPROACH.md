@@ -1,9 +1,9 @@
 # End-to-End Approach for the LogiSense Copilot Demo
 
 ## 1. Product goal
-Build a senior-quality logistics AI copilot experience inspired by the CBRE-style assistant pattern: a right-side floating chatbot panel, a polished enterprise dashboard, and a realistic workflow that feels like a business tool rather than a toy demo.
+Build a senior-quality logistics AI copilot experience: a right-side floating chatbot panel, a polished enterprise dashboard, and a realistic workflow that feels like a business tool rather than a toy demo.
 
-The visual direction should use the Nagarro or FLO aesthetic instead of the CBRE brand and green palette. The default visual language should be:
+The visual direction should use the Nagarro or FLO aesthetic. The default visual language should be:
 - dark navy / blue background
 - teal or cyan accents
 - muted white/gray text
@@ -68,8 +68,8 @@ The app will have three clear layers:
    - summary bullets
    - suggested prompts / next actions
 
-## 4. UI pattern inspired by the CBRE assistant design
-We will not use the CBRE brand, green palette, or name. Instead, we will re-create the same interaction pattern with a local product identity:
+## 4. UI pattern for the assistant design
+We will use a local product identity for the interaction pattern:
 
 - floating assistant on the right side
 - small circular icon with a clean stylized mark
@@ -90,7 +90,6 @@ Use a Nagarro/FLO-inspired palette:
 
 Avoid:
 - bright green as the dominant accent
-- CBRE naming text or branding
 - heavy consumer-chat styling
 
 ## 6. Single-script startup model

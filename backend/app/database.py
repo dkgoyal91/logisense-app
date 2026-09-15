@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from app.config import settings
+
+TABLE_CACHE_FILENAME = 'tables_cache.json'
 
 
 def _resolve_database_path() -> Path:
@@ -11,6 +15,10 @@ def _resolve_database_path() -> Path:
     if candidate.is_absolute():
         return candidate
     return Path(__file__).resolve().parent.parent / candidate
+
+
+def _resolve_table_cache_path() -> Path:
+    return _resolve_database_path().parent / TABLE_CACHE_FILENAME
 
 
 def get_connection() -> sqlite3.Connection:
@@ -21,7 +29,7 @@ def get_connection() -> sqlite3.Connection:
     return connection
 
 
-def _seed_opportunities(connection: sqlite3.Connection) -> None:
+def _generate_opportunities() -> list[dict[str, Any]]:
     client_names = [
         'Sage Homes Limited',
         'Test Client UK UAT1',
@@ -56,7 +64,7 @@ def _seed_opportunities(connection: sqlite3.Connection) -> None:
     regions = ['London', 'Manchester', 'Birmingham', 'Leeds', 'Glasgow', 'Bristol', 'Edinburgh']
     stages = ['In Progress', 'Due to close', 'Portfolio review', 'Awaiting data', 'On hold']
 
-    rows: list[tuple] = []
+    rows: list[dict[str, Any]] = []
     for index in range(1, 431):
         client_name = client_names[(index - 1) % len(client_names)]
         job_director = job_directors[(index - 1) % len(job_directors)]
@@ -70,19 +78,133 @@ def _seed_opportunities(connection: sqlite3.Connection) -> None:
         day = 1 + ((index * 7) % 27)
         valuation_date = f'{valuation_year}-{month:02d}-{day:02d}'
         rows.append(
-            (
-                f'SF-{24000 + index}',
-                client_name,
-                job_director,
-                owner,
-                number_of_properties,
-                valuation_date,
-                status,
-                region,
-                value_usd,
-            )
+            {
+                'salesforce_number': f'SF-{24000 + index}',
+                'client_name': client_name,
+                'job_director': job_director,
+                'opportunity_owner': owner,
+                'number_of_properties': number_of_properties,
+                'valuation_date': valuation_date,
+                'status': status,
+                'region': region,
+                'value_usd': value_usd,
+            }
         )
 
+    return rows
+
+
+def _generate_jobs() -> list[dict[str, Any]]:
+    stages = ['Planning', 'Under review', 'Valuation in progress', 'Awaiting approval', 'Completed']
+    regions = ['London', 'Manchester', 'Birmingham', 'Leeds', 'Glasgow', 'Bristol', 'Edinburgh']
+    client_names = [
+        'Sage Homes Limited',
+        'Test Client UK UAT1',
+        'Client_Tanveer1',
+        'UAT_TestAcc_0609',
+        'Northgate Properties',
+        'Westfield Capital',
+    ]
+    rows: list[dict[str, Any]] = []
+    for index in range(1, 281):
+        client_name = client_names[(index - 1) % len(client_names)]
+        opportunity_ref = f'SF-{24000 + index}'
+        region = regions[(index - 1) % len(regions)]
+        status = stages[(index - 1) % len(stages)]
+        progress_pct = 18 + ((index * 17) % 82)
+        days_open = 3 + ((index * 11) % 220)
+        total_properties = 12 + ((index * 7) % 320)
+        current_stage = stages[(index + 1) % len(stages)]
+        rows.append(
+            {
+                'job_id': f'JOB-{1000 + index}',
+                'opportunity_ref': opportunity_ref,
+                'client_name': client_name,
+                'region': region,
+                'status': status,
+                'progress_pct': progress_pct,
+                'days_open': days_open,
+                'total_properties': total_properties,
+                'current_stage': current_stage,
+            }
+        )
+    return rows
+
+
+def _generate_shipments() -> list[dict[str, Any]]:
+    customers = ['Sage Homes Limited', 'Crestline Logistics', 'BluePeak Housing', 'Test Client UK UAT1', 'Northgate Properties']
+    routes = ['Southampton -> Birmingham', 'Leeds -> London', 'Manchester -> Bristol', 'Birmingham -> Glasgow', 'London -> Edinburgh', 'Leeds -> Manchester']
+    statuses = ['In transit', 'Delayed', 'Delivered', 'Exception', 'Planned']
+    rows: list[dict[str, Any]] = []
+    for index in range(1, 521):
+        customer = customers[(index - 1) % len(customers)]
+        origin, destination = routes[(index - 1) % len(routes)].split(' -> ')
+        status = statuses[(index - 1) % len(statuses)]
+        delivery_day = 1 + ((index * 5) % 28)
+        delivery_month = 1 + ((index * 2) % 12)
+        delivery_year = 2024 + (index % 2)
+        rows.append(
+            {
+                'shipment_id': f'SHP-{5000 + index}',
+                'customer': customer,
+                'route': routes[(index - 1) % len(routes)],
+                'origin': origin,
+                'destination': destination,
+                'status': status,
+                'delivery_date': f'{delivery_year}-{delivery_month:02d}-{delivery_day:02d}',
+                'weight_kg': 180 + ((index * 37) % 2260),
+                'value_usd': 1500 + ((index * 213) % 85000),
+            }
+        )
+    return rows
+
+
+def _generate_vehicles() -> list[dict[str, Any]]:
+    depots = ['London Central', 'Manchester North', 'Birmingham Yard', 'Leeds Depot', 'Glasgow Hub']
+    statuses = ['Available', 'In use', 'Maintenance', 'Idle']
+    rows: list[dict[str, Any]] = []
+    for index in range(1, 96):
+        depot = depots[(index - 1) % len(depots)]
+        status = statuses[(index - 1) % len(statuses)]
+        utilization = 36 + ((index * 7) % 64)
+        service_month = 1 + ((index * 2) % 12)
+        service_year = 2023 + (index % 3)
+        rows.append(
+            {
+                'vehicle_id': f'VEH-{800 + index}',
+                'depot': depot,
+                'status': status,
+                'utilization_pct': utilization,
+                'last_service_date': f'{service_year}-{service_month:02d}-15',
+            }
+        )
+    return rows
+
+
+def _build_table_cache() -> dict[str, list[dict[str, Any]]]:
+    return {
+        'opportunities': _generate_opportunities(),
+        'jobs': _generate_jobs(),
+        'shipments': _generate_shipments(),
+        'vehicles': _generate_vehicles(),
+    }
+
+
+def load_table_cache() -> dict[str, list[dict[str, Any]]]:
+    """Load all seed table rows from a single JSON cache file, building it once if absent."""
+    cache_path = _resolve_table_cache_path()
+    if cache_path.exists():
+        with cache_path.open('r', encoding='utf-8') as handle:
+            return json.load(handle)
+
+    cache = _build_table_cache()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    with cache_path.open('w', encoding='utf-8') as handle:
+        json.dump(cache, handle, indent=2)
+    return cache
+
+
+def _seed_opportunities(connection: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
     connection.executemany(
         """
         INSERT INTO opportunities (
@@ -95,34 +217,23 @@ def _seed_opportunities(connection: sqlite3.Connection) -> None:
             status,
             region,
             value_usd
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (
+            :salesforce_number,
+            :client_name,
+            :job_director,
+            :opportunity_owner,
+            :number_of_properties,
+            :valuation_date,
+            :status,
+            :region,
+            :value_usd
+        )
         """,
         rows,
     )
 
 
-def _seed_jobs(connection: sqlite3.Connection) -> None:
-    stages = ['Planning', 'Under review', 'Valuation in progress', 'Awaiting approval', 'Completed']
-    regions = ['London', 'Manchester', 'Birmingham', 'Leeds', 'Glasgow', 'Bristol', 'Edinburgh']
-    client_names = [
-        'Sage Homes Limited',
-        'Test Client UK UAT1',
-        'Client_Tanveer1',
-        'UAT_TestAcc_0609',
-        'Northgate Properties',
-        'Westfield Capital',
-    ]
-    rows: list[tuple] = []
-    for index in range(1, 281):
-        client_name = client_names[(index - 1) % len(client_names)]
-        opportunity_ref = f'SF-{24000 + index}'
-        region = regions[(index - 1) % len(regions)]
-        status = stages[(index - 1) % len(stages)]
-        progress_pct = 18 + ((index * 17) % 82)
-        days_open = 3 + ((index * 11) % 220)
-        total_properties = 12 + ((index * 7) % 320)
-        current_stage = stages[(index + 1) % len(stages)]
-        rows.append((f'JOB-{1000 + index}', opportunity_ref, client_name, region, status, progress_pct, days_open, total_properties, current_stage))
+def _seed_jobs(connection: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
     connection.executemany(
         """
         INSERT INTO jobs (
@@ -135,37 +246,23 @@ def _seed_jobs(connection: sqlite3.Connection) -> None:
             days_open,
             total_properties,
             current_stage
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (
+            :job_id,
+            :opportunity_ref,
+            :client_name,
+            :region,
+            :status,
+            :progress_pct,
+            :days_open,
+            :total_properties,
+            :current_stage
+        )
         """,
         rows,
     )
 
 
-def _seed_shipments(connection: sqlite3.Connection) -> None:
-    customers = ['Sage Homes Limited', 'Crestline Logistics', 'BluePeak Housing', 'Test Client UK UAT1', 'Northgate Properties']
-    routes = ['Southampton -> Birmingham', 'Leeds -> London', 'Manchester -> Bristol', 'Birmingham -> Glasgow', 'London -> Edinburgh', 'Leeds -> Manchester']
-    statuses = ['In transit', 'Delayed', 'Delivered', 'Exception', 'Planned']
-    rows: list[tuple] = []
-    for index in range(1, 521):
-        customer = customers[(index - 1) % len(customers)]
-        origin, destination = routes[(index - 1) % len(routes)].split(' -> ')
-        status = statuses[(index - 1) % len(statuses)]
-        delivery_day = 1 + ((index * 5) % 28)
-        delivery_month = 1 + ((index * 2) % 12)
-        delivery_year = 2024 + (index % 2)
-        rows.append(
-            (
-                f'SHP-{5000 + index}',
-                customer,
-                routes[(index - 1) % len(routes)],
-                origin,
-                destination,
-                status,
-                f'{delivery_year}-{delivery_month:02d}-{delivery_day:02d}',
-                180 + ((index * 37) % 2260),
-                1500 + ((index * 213) % 85000),
-            )
-        )
+def _seed_shipments(connection: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
     connection.executemany(
         """
         INSERT INTO shipments (
@@ -178,31 +275,23 @@ def _seed_shipments(connection: sqlite3.Connection) -> None:
             delivery_date,
             weight_kg,
             value_usd
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (
+            :shipment_id,
+            :customer,
+            :route,
+            :origin,
+            :destination,
+            :status,
+            :delivery_date,
+            :weight_kg,
+            :value_usd
+        )
         """,
         rows,
     )
 
 
-def _seed_vehicles(connection: sqlite3.Connection) -> None:
-    depots = ['London Central', 'Manchester North', 'Birmingham Yard', 'Leeds Depot', 'Glasgow Hub']
-    statuses = ['Available', 'In use', 'Maintenance', 'Idle']
-    rows: list[tuple] = []
-    for index in range(1, 96):
-        depot = depots[(index - 1) % len(depots)]
-        status = statuses[(index - 1) % len(statuses)]
-        utilization = 36 + ((index * 7) % 64)
-        service_month = 1 + ((index * 2) % 12)
-        service_year = 2023 + (index % 3)
-        rows.append(
-            (
-                f'VEH-{800 + index}',
-                depot,
-                status,
-                utilization,
-                f'{service_year}-{service_month:02d}-15',
-            )
-        )
+def _seed_vehicles(connection: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
     connection.executemany(
         """
         INSERT INTO vehicles (
@@ -211,7 +300,13 @@ def _seed_vehicles(connection: sqlite3.Connection) -> None:
             status,
             utilization_pct,
             last_service_date
-        ) VALUES (?, ?, ?, ?, ?)
+        ) VALUES (
+            :vehicle_id,
+            :depot,
+            :status,
+            :utilization_pct,
+            :last_service_date
+        )
         """,
         rows,
     )
@@ -302,15 +397,21 @@ def initialize_database() -> None:
             connection.execute('DELETE FROM vehicles')
             connection.execute("DELETE FROM sqlite_sequence WHERE name IN ('opportunities', 'jobs', 'shipments', 'vehicles')")
 
+        if needs_reseed or current_counts['opportunities'] == 0 or current_counts['jobs'] == 0 or current_counts['shipments'] == 0 or current_counts['vehicles'] == 0:
+            table_cache = load_table_cache()
+        else:
+            table_cache = None
+
         if needs_reseed or current_counts['opportunities'] == 0:
-            _seed_opportunities(connection)
+            _seed_opportunities(connection, table_cache['opportunities'])
         if needs_reseed or current_counts['jobs'] == 0:
-            _seed_jobs(connection)
+            _seed_jobs(connection, table_cache['jobs'])
         if needs_reseed or current_counts['shipments'] == 0:
-            _seed_shipments(connection)
+            _seed_shipments(connection, table_cache['shipments'])
         if needs_reseed or current_counts['vehicles'] == 0:
-            _seed_vehicles(connection)
+            _seed_vehicles(connection, table_cache['vehicles'])
 
         connection.commit()
     finally:
         connection.close()
+

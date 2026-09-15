@@ -4,9 +4,10 @@ from collections import defaultdict, deque
 from typing import Any
 
 try:
-    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
     from langgraph.graph import END, START, StateGraph
-except ImportError:  # pragma: no cover - fallback path when dependencies are not installed
+except ImportError:  # pragma: no cover - graceful path when dependencies are not installed
+    AIMessage = None
     HumanMessage = None
     SystemMessage = None
     END = None
@@ -14,71 +15,118 @@ except ImportError:  # pragma: no cover - fallback path when dependencies are no
     StateGraph = None
 
 from app.config import settings
-from app.sql_service import execute_safe_query
+from app.sql_service import detect_table_from_message, execute_safe_query
 
 conversation_store: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
+# Remembers the last table each session queried, so follow-up questions ("show more of those")
+# stay grounded without the user having to restate the table every turn.
+last_table_by_session: dict[str, str | None] = defaultdict(lambda: None)
 
 
 def build_llm() -> Any | None:
-    if settings.is_groq_configured:
-        try:
-            from langchain_groq import ChatGroq
+    if not settings.is_groq_configured:
+        return None
 
-            return ChatGroq(
-                model=settings.groq_model,
-                api_key=settings.groq_api_key,
-                temperature=0.2,
-            )
-        except Exception:
-            return None
+    try:
+        from langchain_groq import ChatGroq
 
-    if settings.is_gemini_configured:
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-
-            return ChatGoogleGenerativeAI(
-                model=settings.gemini_model,
-                api_key=settings.gemini_api_key,
-                temperature=0.2,
-            )
-        except Exception:
-            return None
-
-    return None
+        return ChatGroq(
+            model=settings.groq_model,
+            api_key=settings.groq_api_key,
+            temperature=0.2,
+        )
+    except Exception:
+        return None
 
 
-def _fallback_answer(user_message: str, history: list[str]) -> str:
-    context_text = ' '.join(history[-2:]) if history else 'No prior context.'
-    return (
-        'I am in a configured fallback mode. Based on the current conversation context, '
-        f'you asked: "{user_message}". Recent context: {context_text}. '
-        'Connect a valid Groq or Gemini API key in the environment to enable live model reasoning.'
-    )
+def _history_to_messages(history: list[str]) -> list[Any]:
+    """Turn the stored 'User: ...' / 'Assistant: ...' log into real chat messages for 2-way context."""
+    messages: list[Any] = []
+    for line in history[-6:]:
+        if line.startswith('User: '):
+            messages.append(HumanMessage(content=line[len('User: ') :]))
+        elif line.startswith('Assistant: '):
+            messages.append(AIMessage(content=line[len('Assistant: ') :]))
+    return messages
 
 
-def _query_answer(user_message: str, history: list[str]) -> dict[str, Any]:
-    result = execute_safe_query(user_message)
-    if result.get('table') is None:
-        return {
-            'answer': _fallback_answer(user_message, history),
-            'table': None,
-            'rows': [],
-            'summary': result.get('summary', 'No data available.'),
-        }
+def router_agent(state: dict[str, Any]) -> dict[str, Any]:
+    """Classify which approved table the question targets, falling back to the session's last table."""
+    user_message = state['user_message']
+    session_id = state.get('session_id', 'default-session')
 
+    if not user_message:
+        state['table_hint'] = None
+        return state
+
+    state['table_hint'] = detect_table_from_message(user_message) or last_table_by_session[session_id]
+    return state
+
+
+def sql_agent(state: dict[str, Any]) -> dict[str, Any]:
+    """Run the safe, schema-validated SQL lookup grounded on the router's table hint."""
+    user_message = state['user_message']
+    session_id = state.get('session_id', 'default-session')
+
+    result = execute_safe_query(user_message, table_hint=state.get('table_hint'))
+    table = result.get('table')
     rows = result.get('rows', [])
+    summary = result.get('summary', 'No data available.')
+
+    if table:
+        last_table_by_session[session_id] = table
+
+    state['table'] = table
+    state['rows'] = rows
+    state['summary'] = summary
+
+    if table is None:
+        state['grounded_answer'] = summary
+        return state
+
     preview = rows[:3]
-    summary = result.get('summary', f'Fetched {len(rows)} rows.')
-    answer = (
-        f'{summary} The query targeted the {result["table"]} table. '
+    state['grounded_answer'] = (
+        f'{summary} The query targeted the {table} table. '
         f'Example rows: {preview if preview else "no matching records"}.'
     )
-    return {
-        'answer': answer,
-        'table': result['table'],
-        'rows': rows,
-        'summary': summary,
-    }
+    return state
+
+
+def summary_agent(state: dict[str, Any]) -> dict[str, Any]:
+    """Phrase the final answer with the LLM, strictly grounded on the SQL agent's output."""
+    state['final_response'] = state['grounded_answer']
+
+    llm = build_llm()
+    if llm is None or not state.get('rows'):
+        return state
+
+    messages: list[Any] = [
+        SystemMessage(
+            content=(
+                'You are LogiSense, a senior logistics AI assistant. Rewrite the grounded data summary '
+                'below into a concise, professional answer for the user, using the conversation history '
+                'for context on follow-up questions. Use only the facts provided; never invent data or '
+                'numbers that are not present in the summary or sample rows.'
+            )
+        ),
+        *_history_to_messages(state.get('history', [])),
+        HumanMessage(
+            content=(
+                f'User question: {state["user_message"]}\n'
+                f'Grounded summary: {state["summary"]}\n'
+                f'Sample rows: {state["rows"][:3]}'
+            )
+        ),
+    ]
+
+    try:
+        result = llm.invoke(messages)
+        state['final_response'] = str(getattr(result, 'content', result))
+    except Exception:
+        # Keep the safe, data-grounded answer already set above.
+        pass
+
+    return state
 
 
 def _build_state_graph() -> Any:
@@ -86,59 +134,13 @@ def _build_state_graph() -> Any:
         raise RuntimeError('langgraph is not installed')
 
     graph = StateGraph(dict)
-
-    def intent_router(state: dict[str, Any]) -> dict[str, Any]:
-        user_message = state['user_message']
-        if not user_message:
-            state['final_response'] = 'Please provide a valid question.'
-            return state
-
-        state['intent'] = 'logistics-insight'
-        state['final_response'] = user_message
-        return state
-
-    def response_builder(state: dict[str, Any]) -> dict[str, Any]:
-        llm = build_llm()
-        user_message = state['user_message']
-        recent_history = state.get('history', [])
-
-        if llm is None:
-            sql_result = _query_answer(user_message, recent_history)
-            state['final_response'] = sql_result['answer']
-            state['rows'] = sql_result['rows']
-            state['summary'] = sql_result['summary']
-            state['table'] = sql_result['table']
-            return state
-
-        messages = [
-            SystemMessage(
-                content=(
-                    'You are LogiSense, a senior logistics AI assistant. Use the conversation context '
-                    'to provide precise enterprise-grade insights. Be concise but helpful. '
-                    'When data is not available, say so clearly.'
-                )
-            )
-        ]
-
-        for previous_message in recent_history:
-            messages.append(HumanMessage(content=previous_message))
-
-        messages.append(HumanMessage(content=user_message))
-
-        try:
-            result = llm.invoke(messages)
-            content = getattr(result, 'content', str(result))
-            state['final_response'] = str(content)
-        except Exception:
-            state['final_response'] = _fallback_answer(user_message, recent_history)
-
-        return state
-
-    graph.add_node('intent_router', intent_router)
-    graph.add_node('response_builder', response_builder)
-    graph.add_edge(START, 'intent_router')
-    graph.add_edge('intent_router', 'response_builder')
-    graph.add_edge('response_builder', END)
+    graph.add_node('router_agent', router_agent)
+    graph.add_node('sql_agent', sql_agent)
+    graph.add_node('summary_agent', summary_agent)
+    graph.add_edge(START, 'router_agent')
+    graph.add_edge('router_agent', 'sql_agent')
+    graph.add_edge('sql_agent', 'summary_agent')
+    graph.add_edge('summary_agent', END)
     return graph
 
 
@@ -156,34 +158,42 @@ def process_chat_turn(session_id: str, user_message: str) -> dict[str, Any]:
     if not trimmed_message:
         return {
             'answer': 'Please provide a question to analyze.',
+            'table': None,
+            'rows': [],
+            'summary': 'No input provided.',
             'session_id': session_id,
             'provider': settings.active_ai_provider,
             'context': history,
         }
 
-    state = {
+    state: dict[str, Any] = {
         'user_message': trimmed_message,
         'history': history,
+        'session_id': session_id,
     }
 
     if agent_graph is None:
-        answer = _fallback_answer(trimmed_message, history)
-        rows: list[dict[str, Any]] = []
-        summary = 'No SQL query executed.'
+        state = router_agent(state)
+        state = sql_agent(state)
+        state = summary_agent(state)
     else:
-        result = agent_graph.invoke(state)
-        answer = result.get('final_response', _fallback_answer(trimmed_message, history))
-        rows = result.get('rows', [])
-        summary = result.get('summary', 'No SQL query executed.')
+        state = agent_graph.invoke(state)
+
+    answer = state.get('final_response', 'No response generated.')
+    rows = state.get('rows', [])
+    summary = state.get('summary', 'No SQL query executed.')
+    table = state.get('table')
 
     conversation_store[session_id].append(f'User: {trimmed_message}')
     conversation_store[session_id].append(f'Assistant: {answer}')
 
     return {
         'answer': answer,
+        'table': table,
         'rows': rows,
         'summary': summary,
         'session_id': session_id,
         'provider': settings.active_ai_provider,
         'context': list(conversation_store[session_id])[-6:],
     }
+

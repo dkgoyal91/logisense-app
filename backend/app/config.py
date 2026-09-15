@@ -16,28 +16,16 @@ class Settings(BaseSettings):
     debug: bool = False
     database_path: str = 'data/logisense.db'
     row_limit: int = 20
-    ai_provider: str = 'fallback'
     groq_api_key: str | None = None
-    gemini_api_key: str | None = None
-    groq_model: str = 'llama-3.1-8b-instant'
-    gemini_model: str = 'gemini-1.5-flash'
-    enable_external_ai: bool = False
+    groq_model: str = 'openai/gpt-oss-20b'
 
     @property
     def is_groq_configured(self) -> bool:
-        return bool(self.enable_external_ai and self.ai_provider == 'groq' and self.groq_api_key)
-
-    @property
-    def is_gemini_configured(self) -> bool:
-        return bool(self.enable_external_ai and self.ai_provider == 'gemini' and self.gemini_api_key)
+        return bool(self.groq_api_key and self.groq_api_key != 'your_groq_api_key_here')
 
     @property
     def active_ai_provider(self) -> str:
-        if self.is_groq_configured:
-            return 'groq'
-        if self.is_gemini_configured:
-            return 'gemini'
-        return 'fallback'
+        return 'groq' if self.is_groq_configured else 'unconfigured'
 
 
 settings = Settings()

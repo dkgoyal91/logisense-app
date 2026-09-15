@@ -57,6 +57,49 @@ TABLE_DEFAULT_ORDER: dict[str, str] = {
     'vehicles': 'utilization_pct DESC',
 }
 
+# Approximate UK city centroids used to plot map markers for location-bearing rows.
+CITY_COORDINATES: dict[str, tuple[float, float]] = {
+    'london': (51.5072, -0.1276),
+    'manchester': (53.4808, -2.2426),
+    'birmingham': (52.4862, -1.8904),
+    'leeds': (53.8008, -1.5491),
+    'glasgow': (55.8642, -4.2518),
+    'bristol': (51.4545, -2.5879),
+    'edinburgh': (55.9533, -3.1883),
+    'southampton': (50.9097, -1.4044),
+}
+
+LOCATION_COLUMN_BY_TABLE: dict[str, str] = {
+    'shipments': 'destination',
+    'opportunities': 'region',
+    'jobs': 'region',
+    'vehicles': 'depot',
+}
+
+
+def _coordinates_for_location(location: str | None) -> tuple[float, float] | None:
+    if not location:
+        return None
+    normalized = location.strip().lower()
+    if normalized in CITY_COORDINATES:
+        return CITY_COORDINATES[normalized]
+    for city, coordinates in CITY_COORDINATES.items():
+        if city in normalized:
+            return coordinates
+    return None
+
+
+def _attach_coordinates(table_name: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    location_column = LOCATION_COLUMN_BY_TABLE.get(table_name)
+    if not location_column:
+        return rows
+
+    for row in rows:
+        coordinates = _coordinates_for_location(row.get(location_column))
+        if coordinates:
+            row['latitude'], row['longitude'] = coordinates
+    return rows
+
 
 def _extract_name(message: str) -> str | None:
     match = re.search(r"(?:managed by|job director|owned by|owner is|by\s+)([A-Z][A-Za-z' .-]+)", message, re.IGNORECASE)
@@ -182,8 +225,8 @@ def _validate_sql(sql: str) -> None:
         raise ValueError(f'Table {table_name} is not allowed.')
 
 
-def execute_safe_query(message: str) -> dict[str, Any]:
-    table_name = detect_table_from_message(message)
+def execute_safe_query(message: str, table_hint: str | None = None) -> dict[str, Any]:
+    table_name = detect_table_from_message(message) or (table_hint if table_hint in ALLOWED_TABLES else None)
     if table_name is None:
         return {'table': None, 'sql': None, 'rows': [], 'summary': 'This question is outside the approved logistics data model.'}
 
@@ -193,6 +236,8 @@ def execute_safe_query(message: str) -> dict[str, Any]:
     with get_connection() as connection:
         cursor = connection.execute(sql, params)
         rows = [dict(row) for row in cursor.fetchall()]
+
+    rows = _attach_coordinates(table_name, rows)
 
     return {
         'table': table_name,
@@ -260,6 +305,8 @@ def get_live_table_rows(table_name: str, limit: int) -> dict[str, Any]:
     with get_connection() as connection:
         cursor = connection.execute(sql, [safe_limit])
         rows = [dict(row) for row in cursor.fetchall()]
+
+    rows = _attach_coordinates(safe_table, rows)
 
     return {
         'table': safe_table,

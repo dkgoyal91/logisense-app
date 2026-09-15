@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 import { ResultChart, ResultMap } from './components/ResultVisuals'
 
@@ -115,21 +115,43 @@ const formatCellValue = (value: unknown): string => {
   return String(value)
 }
 
+// Defense-in-depth: the LLM is instructed to avoid markdown, but strip any raw pipe-table
+// syntax it still emits, since the matching rows already render as a real table below.
+const stripMarkdownTableSyntax = (text: string): string => {
+  const isTableLikeLine = (line: string): boolean => {
+    const trimmed = line.trim()
+    if (!trimmed.includes('|')) {
+      return false
+    }
+    if (/^\|?\s*:?-{2,}.*\|/.test(trimmed)) {
+      return true
+    }
+    return (trimmed.match(/\|/g) ?? []).length >= 2
+  }
+
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !isTableLikeLine(line))
+    .join('\n')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/(?<!\w)\*(.+?)\*(?!\w)/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 const buildAssistantText = (data: ChatResponse): string => {
   const fallback = 'No response from the assistant.'
   const rawText = (data.answer ?? fallback).trim()
   const rowCount = Array.isArray(data.rows) ? data.rows.length : 0
 
   if (rowCount === 0) {
-    return rawText
+    return stripMarkdownTableSyntax(rawText)
   }
 
   const markerIndex = rawText.toLowerCase().indexOf('example rows:')
-  if (markerIndex >= 0) {
-    return rawText.slice(0, markerIndex).trim()
-  }
+  const trimmed = markerIndex >= 0 ? rawText.slice(0, markerIndex).trim() : rawText
 
-  return rawText
+  return stripMarkdownTableSyntax(trimmed) || 'Here are the matching records.'
 }
 
 const buildPreviewSummary = (rows: Record<string, unknown>[], fallback: string): string => {
@@ -215,12 +237,8 @@ function App() {
   const [draft, setDraft] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null)
-  const [tableRows, setTableRows] = useState<Record<string, unknown>[]>([])
-  const [tableSource, setTableSource] = useState<{ table: string; summary: string } | null>(null)
   const [selectedTabId, setSelectedTabId] = useState<string>(tabs[0].id)
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [isChatMaximized, setIsChatMaximized] = useState(false)
-  const [isChatOpen, setIsChatOpen] = useState(true)
   const [isChatMenuOpen, setIsChatMenuOpen] = useState(false)
 
   const selectedTab = tabs.find((item) => item.id === selectedTabId) ?? tabs[0]
@@ -285,40 +303,26 @@ function App() {
     setDashboard(data)
   }
 
-  const fetchLiveRowsForTab = async (tab: ModuleTab, announceInChat: boolean) => {
+  const fetchLiveRowsForTab = async (tab: ModuleTab) => {
     const response = await fetch(`${apiBaseUrl}/api/live/${tab.table}?limit=${tab.limit}`)
     if (!response.ok) {
       throw new Error('Live rows fetch failed')
     }
 
     const data = (await response.json()) as LiveRowsResponse
-    setTableRows(data.rows)
-    setTableSource({ table: data.table, summary: data.summary })
-
-    if (announceInChat) {
-      appendSessionMessage(activeSessionId, {
-        role: 'assistant',
-        text: `${tab.label} loaded. ${data.summary}`,
-        data: {
-          table: data.table,
-          summary: data.summary,
-          rows: data.rows,
-        },
-      })
-    }
+    appendSessionMessage(activeSessionId, {
+      role: 'assistant',
+      text: `${tab.label} loaded. ${data.summary}`,
+      data: {
+        table: data.table,
+        summary: data.summary,
+        rows: data.rows,
+      },
+    })
   }
 
   useEffect(() => {
-    const loadInitial = async () => {
-      try {
-        await fetchDashboard()
-        await fetchLiveRowsForTab(selectedTab, false)
-      } catch (error) {
-        console.error('Unable to load initial data', error)
-      }
-    }
-
-    void loadInitial()
+    fetchDashboard().catch((error) => console.error('Unable to load initial dashboard data', error))
   }, [])
 
   useEffect(() => {
@@ -328,19 +332,10 @@ function App() {
 
     const timer = window.setInterval(() => {
       fetchDashboard().catch((error) => console.error('Auto-refresh dashboard failed', error))
-      fetchLiveRowsForTab(selectedTab, false).catch((error) => console.error('Auto-refresh table failed', error))
     }, 20000)
 
     return () => window.clearInterval(timer)
-  }, [autoRefresh, selectedTab])
-
-  const columns = useMemo(() => {
-    if (tableRows.length === 0) {
-      return []
-    }
-
-    return Object.keys(tableRows[0])
-  }, [tableRows])
+  }, [autoRefresh])
 
   const handleSend = async (prompt?: string) => {
     const nextPrompt = (prompt ?? draft).trim()
@@ -377,15 +372,6 @@ function App() {
       }
 
       appendSessionMessage(sessionId, assistantMessage)
-      setTableRows(rows)
-      setTableSource(
-        data.table
-          ? {
-              table: data.table,
-              summary: data.summary ?? assistantMessage.text,
-            }
-          : null,
-      )
     } catch (error) {
       console.error('Unable to call backend', error)
       appendSessionMessage(sessionId, {
@@ -400,7 +386,7 @@ function App() {
   const handleTabClick = async (tab: ModuleTab) => {
     setSelectedTabId(tab.id)
     try {
-      await fetchLiveRowsForTab(tab, true)
+      await fetchLiveRowsForTab(tab)
     } catch (error) {
       console.error('Unable to fetch tab data', error)
       appendSessionMessage(activeSessionId, {
@@ -413,7 +399,7 @@ function App() {
   const handleRefreshClick = async () => {
     try {
       await fetchDashboard()
-      await fetchLiveRowsForTab(selectedTab, true)
+      await fetchLiveRowsForTab(selectedTab)
     } catch (error) {
       console.error('Unable to refresh', error)
     }
@@ -457,7 +443,6 @@ function App() {
 
     setActiveSessionId(newSessionId)
     setDraft('')
-    setIsChatOpen(true)
     setIsChatMenuOpen(false)
   }
 
@@ -516,223 +501,140 @@ function App() {
   }
 
   return (
-    <div className={`logisense-shell ${isChatMaximized ? 'assistant-maximized' : ''}`}>
-      <div className="workspace-shell">
-        <aside className="project-panel">
-          <div className="project-panel-header">
-            <div className="project-brand">LogiSense Copilot</div>
-            <p>Enterprise logistics assistant</p>
+    <div className="logisense-shell">
+      <header className="app-topbar">
+        <div className="app-topbar-brand">
+          <div className="app-topbar-logo" aria-hidden="true">LS</div>
+          <div className="app-topbar-copy">
+            <span className="app-topbar-title">LogiSense Copilot</span>
+            <span className="app-topbar-subtitle">Enterprise logistics assistant</span>
           </div>
+        </div>
 
-          <nav className="module-nav" aria-label="Operations modules">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={`module-nav-item ${tab.id === selectedTabId ? 'active' : ''}`}
-                onClick={() => void handleTabClick(tab)}
-                aria-label={tab.label}
-                title={tab.helperPrompt}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
+        <nav className="app-topbar-nav" aria-label="Operations modules">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`app-topbar-nav-item ${tab.id === selectedTabId ? 'active' : ''}`}
+              onClick={() => void handleTabClick(tab)}
+              aria-label={tab.label}
+              title={tab.helperPrompt}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
 
-          <div className="quick-metrics" aria-label="Quick metrics">
-            {quickMetrics.map((metric) => (
-              <button
-                key={metric.id}
-                type="button"
-                className="quick-metric"
-                onClick={() => handleIconClick(metric.id)}
-                aria-label={`${metric.label} quick metric`}
-              >
-                <span className="quick-metric-mark">{metric.icon}</span>
-                <span className="quick-metric-body">
-                  <strong>{metric.value}</strong>
-                  <span>{metric.label}</span>
-                  <small>{metric.detail}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-        </aside>
+        <div className="app-topbar-metrics" aria-label="Quick metrics">
+          {quickMetrics.map((metric) => (
+            <button
+              key={metric.id}
+              type="button"
+              className="app-topbar-metric"
+              onClick={() => handleIconClick(metric.id)}
+              aria-label={`${metric.label} quick metric`}
+            >
+              <span className="app-topbar-metric-mark">{metric.icon}</span>
+              <span className="app-topbar-metric-body">
+                <strong>{metric.value}</strong>
+                <span>{metric.label}</span>
+              </span>
+            </button>
+          ))}
+        </div>
 
-        <main className="ops-surface">
-          <header className="ops-surface-header">
+        <div className="app-topbar-controls">
+          <button type="button" onClick={() => setAutoRefresh((value) => !value)}>
+            {autoRefresh ? 'Auto ON' : 'Auto OFF'}
+          </button>
+          <button type="button" onClick={() => void handleRefreshClick()}>
+            Refresh
+          </button>
+        </div>
+      </header>
+
+      <main className="chat-stage">
+        <header className="chat-stage-header">
+          <div className="chat-brand-block">
+            <div className="chat-logo" aria-hidden="true">
+              <span>LS</span>
+            </div>
             <div>
-              <h1>Logistics Operations Tracker</h1>
-              <p>Live terminal, route, and fleet insights driven by validated SQLite logistics data.</p>
+              <h2>LogiSense AI</h2>
+              <p>Your intelligent assistant</p>
             </div>
-            <div className="header-controls">
-              <button type="button" onClick={() => setAutoRefresh((value) => !value)}>
-                {autoRefresh ? 'Auto ON' : 'Auto OFF'}
+          </div>
+
+          <div className="chat-controls">
+            <button type="button" className="icon-toggle" aria-label="New chat" title="New chat" onClick={handleNewChat}>
+              ✎
+            </button>
+            <div className="chat-menu-wrap">
+              <button
+                type="button"
+                className="icon-toggle"
+                aria-label="Chat options"
+                aria-expanded={isChatMenuOpen}
+                onClick={() => setIsChatMenuOpen((value) => !value)}
+              >
+                ⋮
               </button>
-              <button type="button" onClick={() => void handleRefreshClick()}>
-                Refresh
-              </button>
+              {isChatMenuOpen ? (
+                <div className="chat-menu">
+                  <button type="button" className="chat-menu-item" onClick={handleNewChat}>
+                    + New Chat
+                  </button>
+                  <div className="chat-menu-label">Recent Chats</div>
+                  {chatSessions.map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      className={`chat-menu-item ${session.id === activeSessionId ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveSessionId(session.id)
+                        setIsChatMenuOpen(false)
+                      }}
+                    >
+                      {session.title}
+                    </button>
+                  ))}
+                  <button type="button" className="chat-menu-item chat-menu-danger" onClick={handleClearAllChats}>
+                    Clear All
+                  </button>
+                </div>
+              ) : null}
             </div>
-          </header>
+            {isLoading ? (
+              <button type="button" className="icon-toggle stop-toggle" aria-label="Stop generation" onClick={handleStopGeneration}>
+                ■
+              </button>
+            ) : null}
+          </div>
+        </header>
 
-          <section className="analytics-strip" aria-label="Operations KPIs">
-            <article className="kpi-card">
-              <span>Active Shipments</span>
-              <strong>{dashboard ? formatCompact(dashboard.kpis.active_shipments) : '...'}</strong>
-            </article>
-            <article className="kpi-card">
-              <span>Open Jobs</span>
-              <strong>{dashboard ? formatCompact(dashboard.kpis.open_jobs) : '...'}</strong>
-            </article>
-            <article className="kpi-card">
-              <span>Fleet Utilization</span>
-              <strong>{dashboard ? `${dashboard.kpis.fleet_utilization_avg}%` : '...'}</strong>
-            </article>
-            <article className="kpi-card alert">
-              <span>Delayed Shipments</span>
-              <strong>{dashboard ? formatCompact(dashboard.kpis.delayed_shipments) : '...'}</strong>
-            </article>
-            <article className="kpi-card">
-              <span>Active Opportunities</span>
-              <strong>{dashboard ? formatCompact(dashboard.kpis.active_opportunities) : '...'}</strong>
-            </article>
-          </section>
+        <div className="chat-thread">
+          {isWelcomeState ? (
+            <div className="assistant-welcome">
+              <div className="assistant-welcome-mark">LS</div>
+              <h3>Welcome back, Dinesh! 👋</h3>
+              <p>I'm here to help you find insights, analyze data, and answer questions about your logistics operations.</p>
+            </div>
+          ) : null}
 
-          <section className="content-split">
-            <section className="record-panel">
-              <div className="panel-head">
-                <h2>Route Risk Radar</h2>
-                <span>Top delayed corridors</span>
-              </div>
+          {visibleMessages.map((message, index) => {
+            const rows = message.data?.rows ?? []
+            const objectKeys = rows.length > 0 ? Object.keys(rows[0]) : []
+            const summaryText = message.data?.summary ?? buildPreviewSummary(rows, 'Result set ready')
+            const hasRows = rows.length > 0
 
-              <ul className="route-list">
-                {(dashboard?.risk_routes ?? []).map((risk) => (
-                  <li key={risk.route}>
-                    <span>{risk.route}</span>
-                    <strong>{risk.delayed_count}</strong>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="table-panel">
-                <div className="table-panel-head">
-                  <h3>{selectedTab.label}</h3>
-                  <span>{tableSource ? `Fetched from ${tableSource.table}` : 'Live data feed'} · {tableRows.length} rows</span>
+            if (message.role === 'user') {
+              return (
+                <div key={`user-${index}`} className="chat-bubble-row user">
+                  <div className="user-pill">{message.text}</div>
                 </div>
-                {tableSource && <div className="table-panel-summary">{tableSource.summary}</div>}
-
-                <div className="data-table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        {columns.map((column) => (
-                          <th key={column}>{column.replaceAll('_', ' ')}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tableRows.map((row, index) => (
-                        <tr key={`row-${index}`}>
-                          {columns.map((column) => (
-                            <td key={`${index}-${column}`}>{String(row[column] ?? '')}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {tableRows.length === 0 && <div className="empty-data">No rows returned for the current query.</div>}
-                </div>
-              </div>
-            </section>
-
-            {isChatOpen ? (
-              <aside className={`chat-panel ${isChatMaximized ? 'is-maximized' : ''}`}>
-                <header className="chat-panel-header">
-                  <div className="chat-brand-block">
-                    <div className="chat-logo" aria-hidden="true">
-                      <span>LS</span>
-                    </div>
-                    <div>
-                      <h2>LogiSense AI</h2>
-                      <p>Your intelligent assistant</p>
-                    </div>
-                  </div>
-
-                  <div className="chat-controls">
-                    <button type="button" className="icon-toggle" aria-label="New chat" title="New chat" onClick={handleNewChat}>
-                      ✎
-                    </button>
-                    <button type="button" className="icon-toggle" aria-label="Maximize assistant" onClick={() => setIsChatMaximized((value) => !value)}>
-                      {isChatMaximized ? '⤢' : '▢'}
-                    </button>
-                    <div className="chat-menu-wrap">
-                      <button
-                        type="button"
-                        className="icon-toggle"
-                        aria-label="Chat options"
-                        aria-expanded={isChatMenuOpen}
-                        onClick={() => setIsChatMenuOpen((value) => !value)}
-                      >
-                        ⋮
-                      </button>
-                      {isChatMenuOpen ? (
-                        <div className="chat-menu">
-                          <button type="button" className="chat-menu-item" onClick={handleNewChat}>
-                            + New Chat
-                          </button>
-                          <div className="chat-menu-label">Recent Chats</div>
-                          {chatSessions.map((session) => (
-                            <button
-                              key={session.id}
-                              type="button"
-                              className={`chat-menu-item ${session.id === activeSessionId ? 'active' : ''}`}
-                              onClick={() => {
-                                setActiveSessionId(session.id)
-                                setIsChatMenuOpen(false)
-                              }}
-                            >
-                              {session.title}
-                            </button>
-                          ))}
-                          <button type="button" className="chat-menu-item chat-menu-danger" onClick={handleClearAllChats}>
-                            Clear All
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                    {isLoading ? (
-                      <button type="button" className="icon-toggle stop-toggle" aria-label="Stop generation" onClick={handleStopGeneration}>
-                        ■
-                      </button>
-                    ) : null}
-                    <button type="button" className="icon-toggle close-toggle" aria-label="Close assistant" onClick={() => setIsChatOpen(false)}>
-                      ×
-                    </button>
-                  </div>
-                </header>
-
-                <div className="chat-thread">
-                  {isWelcomeState ? (
-                    <div className="assistant-welcome">
-                      <div className="assistant-welcome-mark">LS</div>
-                      <h3>Welcome back, Dinesh! 👋</h3>
-                      <p>I'm here to help you find insights, analyze data, and answer questions about your logistics operations.</p>
-                    </div>
-                  ) : null}
-
-                  {visibleMessages.map((message, index) => {
-                    const rows = message.data?.rows ?? []
-                    const objectKeys = rows.length > 0 ? Object.keys(rows[0]) : []
-                    const summaryText = message.data?.summary ?? buildPreviewSummary(rows, 'Result set ready')
-                    const hasRows = rows.length > 0
-
-                    if (message.role === 'user') {
-                      return (
-                        <div key={`user-${index}`} className="chat-bubble-row user">
-                          <div className="user-pill">{message.text}</div>
-                        </div>
-                      )
-                    }
+              )
+            }
 
                     return (
                       <div key={`assistant-${index}`} className="chat-bubble-row assistant">
@@ -902,22 +804,8 @@ function App() {
                     ➤
                   </button>
                 </div>
-              </aside>
-            ) : (
-              <button
-                type="button"
-                className="chat-launcher"
-                aria-label="Open LogiSense AI assistant"
-                onClick={() => setIsChatOpen(true)}
-                title="Open LogiSense AI"
-              >
-                <span className="chat-launcher-icon">LS</span>
-              </button>
-            )}
-          </section>
-        </main>
-      </div>
-    </div>
+              </main>
+            </div>
   )
 }
 

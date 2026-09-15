@@ -106,7 +106,10 @@ def summary_agent(state: dict[str, Any]) -> dict[str, Any]:
                 'You are LogiSense, a senior logistics AI assistant. Rewrite the grounded data summary '
                 'below into a concise, professional answer for the user, using the conversation history '
                 'for context on follow-up questions. Use only the facts provided; never invent data or '
-                'numbers that are not present in the summary or sample rows.'
+                'numbers that are not present in the summary or sample rows. The matching records are '
+                'already rendered to the user as a data table in the UI, so respond in plain prose '
+                'sentences only: do not use markdown tables, pipe characters, bullet lists, or bold/italic '
+                'asterisks, and do not restate the raw rows.'
             )
         ),
         *_history_to_messages(state.get('history', [])),

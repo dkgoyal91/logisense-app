@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="LogiSense">
+  <defs>
+    <linearGradient id="ls-route" x1="8" y1="6" x2="24" y2="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="32" height="32" rx="8" fill="#06111f"/>
+  <rect x="0.5" y="0.5" width="31" height="31" rx="7.5" fill="none" stroke="#34d399" stroke-opacity="0.24"/>
+
+  <!-- Routing path: three waypoints tracing an implied "L". -->
+  <path d="M10 8.5 V20 H22.5" fill="none" stroke="url(#ls-route)" stroke-width="2.6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <circle cx="10" cy="8.5" r="3" fill="#06111f" stroke="#34d399" stroke-width="2.2"/>
+  <circle cx="10" cy="20" r="2.4" fill="#5eead4"/>
+  <circle cx="22.5" cy="20" r="3" fill="#06111f" stroke="#3b82f6" stroke-width="2.2"/>
+</svg>

@@ -1,24 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './Dashboard.css'
-import { formatCellValue, formatCompact, humanizeColumnName } from '../utils/format'
+import { formatCellValue, formatCompact, humanizeColumnName, isNumericColumn, statusTone } from '../utils/format'
+import type { DashboardKpis } from '../types'
 
 type DashboardTableId = 'logistics_records' | 'jobs' | 'shipments' | 'vehicles'
 
 type DashboardTableMeta = {
   id: DashboardTableId
   label: string
-}
-
-type DashboardKpis = {
-  active_shipments: number
-  delayed_shipments: number
-  fleet_utilization_avg: number
-  open_jobs: number
-  active_records: number
-}
-
-type DashboardSnapshot = {
-  kpis: DashboardKpis
 }
 
 type LiveTableResponse = {
@@ -44,9 +33,19 @@ const DASHBOARD_TABLES: DashboardTableMeta[] = [
 ]
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100]
+
+function DashboardCell({ column, value }: { column: string; value: unknown }) {
+  const tone = column.toLowerCase() === 'status' ? statusTone(value) : null
+
+  if (!tone) {
+    return <>{formatCellValue(value)}</>
+  }
+
+  return <span className={`ls-status-pill ls-status-${tone}`}>{formatCellValue(value)}</span>
+}
 const SEARCH_DEBOUNCE_MS = 350
 
-export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
+export function Dashboard({ apiBaseUrl, kpis }: { apiBaseUrl: string; kpis: DashboardKpis | null }) {
   const [selectedTable, setSelectedTable] = useState<DashboardTableId>('logistics_records')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
@@ -56,7 +55,6 @@ export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false)
   const [filterOptions, setFilterOptions] = useState<FilterOptionsResponse | null>(null)
   const [tableData, setTableData] = useState<LiveTableResponse | null>(null)
-  const [kpis, setKpis] = useState<DashboardKpis | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -67,30 +65,6 @@ export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
     const timer = window.setTimeout(() => setSearchTerm(searchInput.trim()), SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(timer)
   }, [searchInput])
-
-  useEffect(() => {
-    let cancelled = false
-
-    const fetchKpis = async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/api/dashboard`)
-        if (!response.ok) {
-          throw new Error('Dashboard snapshot fetch failed')
-        }
-        const data = (await response.json()) as DashboardSnapshot
-        if (!cancelled) {
-          setKpis(data.kpis)
-        }
-      } catch (error) {
-        console.error('Unable to load dashboard KPIs', error)
-      }
-    }
-
-    void fetchKpis()
-    return () => {
-      cancelled = true
-    }
-  }, [apiBaseUrl])
 
   useEffect(() => {
     let cancelled = false
@@ -110,13 +84,18 @@ export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
       }
     }
 
-    setFilters({})
-    setIsFilterPanelOpen(false)
     void fetchFilterOptions()
     return () => {
       cancelled = true
     }
   }, [apiBaseUrl, selectedTable])
+
+  // Batched with the table change, so the rows effect re-runs once rather than twice.
+  const handleTableChange = (tableId: DashboardTableId) => {
+    setSelectedTable(tableId)
+    setFilters({})
+    setIsFilterPanelOpen(false)
+  }
 
   // Reset back to page 1 whenever the dataset, search term, page size, or filters change.
   useEffect(() => {
@@ -221,7 +200,7 @@ export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
             role="tab"
             aria-selected={table.id === selectedTable}
             className={`dashboard-table-tab ${table.id === selectedTable ? 'active' : ''}`}
-            onClick={() => setSelectedTable(table.id)}
+            onClick={() => handleTableChange(table.id)}
           >
             {table.label}
           </button>
@@ -300,7 +279,9 @@ export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
             <thead>
               <tr>
                 {columns.map((column) => (
-                  <th key={column}>{humanizeColumnName(column)}</th>
+                  <th key={column} className={isNumericColumn(rows, column) ? 'numeric' : undefined}>
+                    {humanizeColumnName(column)}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -308,7 +289,9 @@ export function Dashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
               {rows.map((row, rowIndex) => (
                 <tr key={rowIndex} className={isLoading ? 'dashboard-row-refreshing' : ''}>
                   {columns.map((column) => (
-                    <td key={column}>{formatCellValue(row[column])}</td>
+                    <td key={column} className={isNumericColumn(rows, column) ? 'numeric' : undefined}>
+                      <DashboardCell column={column} value={row[column]} />
+                    </td>
                   ))}
                 </tr>
               ))}

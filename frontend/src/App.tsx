@@ -1,10 +1,18 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { ResultChart, ResultMap } from './components/ResultVisuals'
+import { describeChart } from './utils/chartPlan'
+import { useVisibilityAwarePolling } from './hooks/useVisibilityAwarePolling'
+import type { DashboardKpis } from './types'
+import { ResultTable } from './components/ResultTable'
 import { Dashboard } from './components/Dashboard'
-import { formatCellValue, formatCompact } from './utils/format'
+import { AppLogo } from './components/AppLogo'
+import { Icon } from './components/Icon'
+import { formatCellValue, formatColumnLabel, formatCompact } from './utils/format'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+
+const DASHBOARD_POLL_INTERVAL_MS = 20000
 
 type ResultView = 'chart' | 'map' | 'summary'
 
@@ -25,14 +33,6 @@ type ChatSession = {
   id: string
   title: string
   messages: ChatMessage[]
-}
-
-type DashboardKpis = {
-  active_shipments: number
-  delayed_shipments: number
-  fleet_utilization_avg: number
-  open_jobs: number
-  active_records: number
 }
 
 type RouteRisk = {
@@ -154,6 +154,38 @@ const buildAssistantText = (data: ChatResponse): string => {
   return sanitizeVisibleText(stripMarkdownTableSyntax(trimmed) || 'Here are the matching records.')
 }
 
+// One compact line of provenance for the result-set bar. Deliberately computed from the
+// rows rather than reusing the model's prose, which belongs in the answer bubble.
+const buildResultHeadline = (rows: Record<string, unknown>[], table?: string | null): string => {
+  if (rows.length === 0) {
+    return 'No matching records'
+  }
+
+  const noun = table === 'vehicles' ? 'vehicle' : table === 'jobs' ? 'work order' : 'record'
+  const parts = [`${rows.length} ${noun}${rows.length === 1 ? '' : 's'}`]
+
+  const statusCounts = rows.reduce<Record<string, number>>((counts, row) => {
+    const status = String(row.status ?? '').trim()
+    if (status) {
+      counts[status] = (counts[status] ?? 0) + 1
+    }
+    return counts
+  }, {})
+  const topStatus = Object.entries(statusCounts).sort((a, b) => b[1] - a[1])[0]
+  if (topStatus) {
+    parts.push(`${topStatus[1]} ${topStatus[0].toLowerCase()}`)
+  }
+
+  const routes = new Set(rows.map((row) => row.route).filter(Boolean))
+  if (routes.size === 1) {
+    parts.push(String([...routes][0]))
+  } else if (routes.size > 1) {
+    parts.push(`${routes.size} routes`)
+  }
+
+  return parts.join(' \u00b7 ')
+}
+
 const buildResultSummary = (rows: Record<string, unknown>[], table?: string | null, fallback = 'Result set ready'): string => {
   if (rows.length === 0) {
     return fallback
@@ -167,7 +199,9 @@ const buildResultSummary = (rows: Record<string, unknown>[], table?: string | nu
   }, {})
 
   const delayed = statusCounts.delayed ?? 0
-  const onTime = statusCounts['on time'] ?? 0
+  const exceptions = statusCounts.exception ?? 0
+  const delivered = statusCounts.delivered ?? 0
+  const inTransit = (statusCounts['in transit'] ?? 0) + (statusCounts.planned ?? 0)
   const maintenance = statusCounts.maintenance ?? 0
   const route = String(rows[0].route ?? rows[0].destination ?? rows[0].region ?? 'the selected route corridor')
   const region = String(rows[0].region ?? rows[0].destination ?? 'the selected logistics area')
@@ -176,7 +210,7 @@ const buildResultSummary = (rows: Record<string, unknown>[], table?: string | nu
     const delayShare = Math.round((delayed / total) * 100) || 0
     const summarySentences = [
       `There are ${total} shipments in view across the active logistics network.`,
-      `The current status mix shows ${delayed} delayed loads and ${onTime || total - delayed} on-time movements.`,
+      `The status mix is ${delivered} delivered, ${inTransit} in transit or planned, ${delayed} delayed and ${exceptions} in exception.`,
       `The strongest concentration is around ${route}, which is the main corridor driving current delivery pressure.`,
       `This means ${delayShare}% of the visible batch requires operational attention before the next dispatch window.`,
       `Priority focus should remain on route timing, vehicle readiness, and customer communication for the delayed freight.`,
@@ -232,22 +266,6 @@ const formatTimestamp = (value?: number): string => {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value))
-}
-
-const formatColumnLabel = (column: string): string => {
-  const normalized = column
-    .replace(/opportunity_ref/gi, 'record_ref')
-    .replace(/pipeline_ref/gi, 'record_ref')
-    .replace(/salesforce_number/gi, 'record_ref')
-    .replace(/job_director/gi, 'operations_lead')
-    .replace(/opportunity_owner/gi, 'logistics_owner')
-    .replace(/valuation_date/gi, 'review_date')
-    .replace(/number_of_properties/gi, 'route_count')
-    .replace(/portfolio/gi, 'record set')
-    .replace(/_+/g, ' ')
-    .trim()
-
-  return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 const sanitizeVisibleText = (text: string): string => {
@@ -426,17 +444,15 @@ function App() {
     fetchDashboard().catch((error) => console.error('Unable to load initial dashboard data', error))
   }, [])
 
-  useEffect(() => {
-    if (!autoRefresh) {
-      return
-    }
-
-    const timer = window.setInterval(() => {
+  // The KPI payload only drives the dashboard view, so polling it while the user is
+  // reading chat — or while the tab sits in the background — is pure waste.
+  useVisibilityAwarePolling({
+    intervalMs: DASHBOARD_POLL_INTERVAL_MS,
+    enabled: autoRefresh && activeView === 'dashboard',
+    onPoll: () => {
       fetchDashboard().catch((error) => console.error('Auto-refresh dashboard failed', error))
-    }, 20000)
-
-    return () => window.clearInterval(timer)
-  }, [autoRefresh])
+    },
+  })
 
   const handleSend = async (prompt?: string) => {
     const nextPrompt = (prompt ?? draft).trim()
@@ -609,7 +625,7 @@ function App() {
       <header className="app-topbar">
         <div className="app-topbar-primary">
           <div className="app-topbar-brand">
-            <div className="app-topbar-logo" aria-hidden="true">LS</div>
+            <div className="app-topbar-logo"><AppLogo size={34} /></div>
             <div className="app-topbar-copy">
               <span className="app-topbar-title">{topbarTitle}</span>
               <span className="app-topbar-subtitle">{topbarSubtitle}</span>
@@ -638,10 +654,17 @@ function App() {
           </div>
 
           <div className="app-topbar-controls">
-            <button type="button" className={autoRefresh ? 'active' : ''} onClick={() => setAutoRefresh((value) => !value)}>
+            <button
+              type="button"
+              className={`ls-btn ls-btn--secondary ${autoRefresh ? 'is-active' : ''}`}
+              aria-pressed={autoRefresh}
+              onClick={() => setAutoRefresh((value) => !value)}
+            >
+              <span className={`ls-live-dot ${autoRefresh ? 'is-live' : ''}`} aria-hidden="true" />
               {autoRefresh ? 'Auto Refresh On' : 'Auto Refresh Off'}
             </button>
-            <button type="button" onClick={() => void handleRefreshClick()}>
+            <button type="button" className="ls-btn ls-btn--secondary" onClick={() => void handleRefreshClick()}>
+              <Icon name="refresh" />
               Refresh Data
             </button>
           </div>
@@ -696,7 +719,7 @@ function App() {
 
       {activeView === 'dashboard' ? (
         <main className="chat-stage dashboard-stage">
-          <Dashboard apiBaseUrl={apiBaseUrl} />
+          <Dashboard apiBaseUrl={apiBaseUrl} kpis={dashboard?.kpis ?? null} />
         </main>
       ) : (
       <main className="chat-stage">
@@ -711,18 +734,18 @@ function App() {
           </div>
 
           <div className="chat-controls">
-            <button type="button" className="icon-toggle" aria-label="New chat" title="New chat" onClick={handleNewChat}>
-              ✎
+            <button type="button" className="ls-btn ls-btn--icon" aria-label="New chat" title="New chat" onClick={handleNewChat}>
+              <Icon name="compose" />
             </button>
             <div className="chat-menu-wrap">
               <button
                 type="button"
-                className="icon-toggle"
+                className="ls-btn ls-btn--icon"
                 aria-label="Chat options"
                 aria-expanded={isChatMenuOpen}
                 onClick={() => setIsChatMenuOpen((value) => !value)}
               >
-                ⋮
+                <Icon name="more" />
               </button>
               {isChatMenuOpen ? (
                 <div className="chat-menu">
@@ -750,8 +773,8 @@ function App() {
               ) : null}
             </div>
             {isLoading ? (
-              <button type="button" className="icon-toggle stop-toggle" aria-label="Stop generation" onClick={handleStopGeneration}>
-                ■
+              <button type="button" className="ls-btn ls-btn--icon stop-toggle" aria-label="Stop generation" onClick={handleStopGeneration}>
+                <Icon name="stop" />
               </button>
             ) : null}
           </div>
@@ -760,7 +783,7 @@ function App() {
         <div className="chat-thread">
           {isWelcomeState ? (
             <div className="assistant-welcome">
-              <div className="assistant-welcome-mark">LS</div>
+              <div className="assistant-welcome-mark"><AppLogo size={46} /></div>
               <span className="assistant-welcome-eyebrow">Live workspace</span>
               <h3>Start with a logistics question or choose an operational workflow.</h3>
               <p>Use the modules above to inspect freight, fleet, route risk, work orders, and records without leaving the workspace.</p>
@@ -769,8 +792,8 @@ function App() {
 
           {visibleMessages.map((message, index) => {
             const rows = message.data?.rows ?? []
-            const objectKeys = rows.length > 0 ? Object.keys(rows[0]) : []
-            const summaryText = message.data?.summary?.trim() || buildResultSummary(rows, message.data?.table, 'Result set ready')
+            const headlineText = buildResultHeadline(rows, message.data?.table)
+            const summaryText = buildResultSummary(rows, message.data?.table, 'Result set ready')
             const hasRows = rows.length > 0
 
             if (message.role === 'user') {
@@ -788,7 +811,9 @@ function App() {
                             <button type="button" className="thinking-toggle" onClick={() => toggleMessageThinking(index)}>
                               <span className="thinking-dot" aria-hidden="true" />
                               Show thinking
-                              <span className={`thinking-chevron ${message.thinkingOpen ? 'open' : ''}`}>⌄</span>
+                              <span className={`thinking-chevron ${message.thinkingOpen ? 'open' : ''}`}>
+                                <Icon name="chevron-down" size={13} />
+                              </span>
                             </button>
                             <span className="bubble-timestamp">{formatTimestamp(message.createdAt)}</span>
                           </div>
@@ -804,60 +829,46 @@ function App() {
                             <div className="chat-result-table">
                               <div className="chat-result-head">
                                 <span>Result set</span>
-                                <span>{summaryText}</span>
+                                <span>{headlineText}</span>
                               </div>
-                              <div className="chat-result-body">
-                                <table>
-                                  <thead>
-                                    <tr>
-                                      {objectKeys.map((column) => (
-                                        <th key={column}>{formatColumnLabel(column)}</th>
-                                      ))}
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {rows.slice(0, 5).map((row, rowIndex) => (
-                                      <tr key={`${index}-${rowIndex}`}>
-                                        {objectKeys.map((column) => (
-                                          <td key={`${index}-${rowIndex}-${column}`}>{formatCellValue(row[column])}</td>
-                                        ))}
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
+                              <ResultTable rows={rows} />
                             </div>
                           ) : null}
 
                           {hasRows ? (
                             <div className="message-action-row">
-                              <button type="button" onClick={() => void handleCopyMessage(rows, message.data?.table, message.text)}>
+                              <button
+                                type="button"
+                                className="ls-btn ls-btn--ghost ls-btn--sm"
+                                onClick={() => void handleCopyMessage(rows, message.data?.table, message.text)}
+                              >
+                                <Icon name="copy" size={13} />
                                 Copy
                               </button>
-                              <button type="button" onClick={() => handleRegenerateMessage(index)}>
+                              <button
+                                type="button"
+                                className="ls-btn ls-btn--ghost ls-btn--sm"
+                                onClick={() => handleRegenerateMessage(index)}
+                              >
+                                <Icon name="refresh" size={13} />
                                 Regenerate
                               </button>
-                              <button
-                                type="button"
-                                className={message.view === 'chart' ? 'active' : ''}
-                                onClick={() => toggleMessageView(index, 'chart')}
-                              >
-                                {message.view === 'chart' ? 'Close Chart' : 'View Chart'}
-                              </button>
-                              <button
-                                type="button"
-                                className={message.view === 'map' ? 'active' : ''}
-                                onClick={() => toggleMessageView(index, 'map')}
-                              >
-                                {message.view === 'map' ? 'Close Map' : 'View Map'}
-                              </button>
-                              <button
-                                type="button"
-                                className={message.view === 'summary' ? 'active' : ''}
-                                onClick={() => toggleMessageView(index, 'summary')}
-                              >
-                                {message.view === 'summary' ? 'Close Summary' : 'View Summary'}
-                              </button>
+                              {([
+                                { view: 'chart', icon: 'chart', label: 'Chart' },
+                                { view: 'map', icon: 'map', label: 'Map' },
+                                { view: 'summary', icon: 'summary', label: 'Summary' },
+                              ] as const).map((action) => (
+                                <button
+                                  key={action.view}
+                                  type="button"
+                                  className={`ls-btn ls-btn--ghost ls-btn--sm ${message.view === action.view ? 'is-active' : ''}`}
+                                  aria-pressed={message.view === action.view}
+                                  onClick={() => toggleMessageView(index, action.view)}
+                                >
+                                  <Icon name={action.icon} size={13} />
+                                  {message.view === action.view ? `Close ${action.label}` : `View ${action.label}`}
+                                </button>
+                              ))}
                             </div>
                           ) : null}
 
@@ -865,7 +876,7 @@ function App() {
                             <div className="chat-visual-card">
                               <div className="chat-visual-card-head">
                                 <h4>Results Breakdown</h4>
-                                <span>{message.data?.table ?? 'Result'} by record count</span>
+                                <span>{describeChart(rows)}</span>
                               </div>
                               <ResultChart rows={rows} />
                             </div>
@@ -910,12 +921,12 @@ function App() {
                       <div className="quick-start-list">
                         {quickStartActions.map((action) => (
                           <button key={action.label} type="button" className="quick-start-row" onClick={() => void handleSend(action.prompt)}>
-                            <span className="quick-start-icon" aria-hidden="true">✦</span>
+                            <span className="quick-start-icon"><Icon name="spark" size={15} /></span>
                             <span className="quick-start-copy">
                               <span className="quick-start-label">{action.label}</span>
                               <span className="quick-start-description">{action.description}</span>
                             </span>
-                            <span className="quick-start-chevron">›</span>
+                            <span className="quick-start-chevron"><Icon name="chevron-right" size={16} /></span>
                           </button>
                         ))}
                       </div>
@@ -947,19 +958,32 @@ function App() {
                       placeholder="Ask a grounded question about freight, fleet, route risk, or work orders..."
                       onChange={(event) => setDraft(event.target.value)}
                       onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
+                        if (event.key === 'Enter' && canSendMessage) {
                           void handleSend()
                         }
                       }}
                     />
                     <span className="composer-counter">{draft.length}/1500</span>
                   </div>
-                  <button type="button" onClick={() => void handleSend()} aria-label="Send message" disabled={!canSendMessage}>
+                  <button
+                    type="button"
+                    className="ls-btn ls-btn--primary"
+                    onClick={() => void handleSend()}
+                    aria-label="Send message"
+                    disabled={!canSendMessage}
+                  >
+                    <Icon name="send" />
                     Send
                   </button>
                 </div>
               </main>
       )}
+
+      <footer className="app-footer">
+        <span className="app-footer-attribution">
+          Powered by <strong>Nagarro</strong>
+        </span>
+      </footer>
             </div>
   )
 }

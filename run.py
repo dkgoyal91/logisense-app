@@ -4,10 +4,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import shutil
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -91,6 +93,12 @@ def _venv_python() -> Path:
     return venv_dir / 'bin' / 'python'
 
 
+def _local_log_file(service_name: str) -> Path:
+    instance_id = os.environ.get('LOGISENSE_INSTANCE', '').strip()
+    suffix = f'-{instance_id}' if instance_id else ''
+    return ROOT / f'.logisense-{service_name}{suffix}.log'
+
+
 def _venv_python_version(venv_python: Path) -> str | None:
     if not venv_python.exists():
         return None
@@ -120,15 +128,87 @@ def _ensure_venv(python_executable: str) -> Path:
     return venv_python
 
 
+def _frontend_dependencies_need_install() -> bool:
+    node_modules_dir = FRONTEND_DIR / 'node_modules'
+    package_json = FRONTEND_DIR / 'package.json'
+    package_lock = FRONTEND_DIR / 'package-lock.json'
+    lock_stamp = node_modules_dir / '.package-lock.json'
+
+    if not node_modules_dir.exists():
+        return True
+
+    if not package_lock.exists():
+        return False
+
+    if not lock_stamp.exists():
+        return True
+
+    manifest_mtime = max(package_json.stat().st_mtime, package_lock.stat().st_mtime)
+    return lock_stamp.stat().st_mtime < manifest_mtime
+
+
 def _ensure_local_dependencies() -> None:
     venv_python = _ensure_venv(_find_python_312())
     _log('Installing backend dependencies')
     subprocess.run([str(venv_python), '-m', 'pip', 'install', '--upgrade', 'pip'], check=True)
     subprocess.run([str(venv_python), '-m', 'pip', 'install', '-r', str(BACKEND_DIR / 'requirements.txt')], check=True)
 
-    if not (FRONTEND_DIR / 'node_modules').exists():
+    if _frontend_dependencies_need_install():
         _log('Installing frontend dependencies')
         subprocess.run(['npm', 'install'], cwd=str(FRONTEND_DIR), check=True)
+
+
+def _ensure_local_services_not_running() -> None:
+    if _has_local_process_running() or _pid_file().exists():
+        raise RuntimeError('Local services already appear to be running. Stop them first with: python3 run.py stop')
+
+
+def _is_port_open(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+        connection.settimeout(0.25)
+        return connection.connect_ex((host, port)) == 0
+
+
+def _wait_for_startup(
+    processes: dict[str, subprocess.Popen[str]],
+    ports: dict[str, int],
+    timeout_seconds: float = 10.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+
+    while time.monotonic() < deadline:
+        failed_service = next((name for name, process in processes.items() if process.poll() is not None), None)
+        if failed_service:
+            break
+        if all(_is_port_open('127.0.0.1', port) for port in ports.values()):
+            return
+        time.sleep(0.2)
+
+    failed_service = next((name for name, process in processes.items() if process.poll() is not None), None)
+
+    for name, process in processes.items():
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+
+    _pid_file().unlink(missing_ok=True)
+
+    if failed_service:
+        failed_process = processes[failed_service]
+        log_file = _local_log_file(failed_service)
+        raise RuntimeError(
+            f'{failed_service.title()} failed to start (exit code {failed_process.returncode}). '
+            f'Check {log_file.name} for details.'
+        )
+
+    pending_services = ', '.join(name for name, port in ports.items() if not _is_port_open('127.0.0.1', port))
+    raise RuntimeError(
+        f'Local services did not become reachable in time: {pending_services}. '
+        'Check the local service logs for details.'
+    )
 
 
 def _backend_env() -> dict[str, str]:
@@ -140,30 +220,45 @@ def _backend_env() -> dict[str, str]:
 
 def _start_local() -> None:
     _ensure_local_dependencies()
+    _ensure_local_services_not_running()
     venv_python = _ensure_venv(_find_python_312())
     backend_port = os.environ.get('BACKEND_PORT', '8000')
     frontend_port = os.environ.get('FRONTEND_PORT', '5173')
 
-    backend_process = subprocess.Popen(
-        [str(venv_python), '-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', backend_port],
-        cwd=str(BACKEND_DIR),
-        env=_backend_env(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    backend_log = _local_log_file('backend')
+    frontend_log = _local_log_file('frontend')
 
-    frontend_process = subprocess.Popen(
-        ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', frontend_port],
-        cwd=str(FRONTEND_DIR),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    with backend_log.open('w', encoding='utf-8') as backend_log_handle, frontend_log.open('w', encoding='utf-8') as frontend_log_handle:
+        backend_process = subprocess.Popen(
+            [str(venv_python), '-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0', '--port', backend_port],
+            cwd=str(BACKEND_DIR),
+            env=_backend_env(),
+            stdin=subprocess.DEVNULL,
+            stdout=backend_log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
 
-    _pid_file().write_text(json.dumps({'backend': backend_process.pid, 'frontend': frontend_process.pid}))
+        frontend_process = subprocess.Popen(
+            ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', frontend_port],
+            cwd=str(FRONTEND_DIR),
+            stdin=subprocess.DEVNULL,
+            stdout=frontend_log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+        _pid_file().write_text(json.dumps({'backend': backend_process.pid, 'frontend': frontend_process.pid}))
+
+        _wait_for_startup(
+            {'backend': backend_process, 'frontend': frontend_process},
+            {'backend': int(backend_port), 'frontend': int(frontend_port)},
+        )
 
     _log('Local services started.')
     _log(f'Backend: http://localhost:{backend_port}')
     _log(f'Frontend: http://localhost:{frontend_port}')
+    _log(f'Logs: {backend_log.name}, {frontend_log.name}')
     _log('Use: python3 run.py stop to stop both services')
 
 

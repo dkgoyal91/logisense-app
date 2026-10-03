@@ -55,3 +55,7 @@ coverage/
 *.bak
 *.tmp
 *~
+
+# Beat the Copilot live game snapshot
+backend/data/game_snapshot.json
+backend/data/game_snapshot.tmp

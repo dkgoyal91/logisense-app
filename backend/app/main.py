@@ -7,11 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.chat_agent import process_chat_turn
-from app.config import settings
+from app.config import resolve_backend_path, settings
 from app.database import initialize_database
 from app.game.routes import get_service as get_game_service
 from app.game.routes import router as game_router
 from app.sql_service import get_dashboard_snapshot, get_filter_options, get_live_table_rows
+from app.static_site import mount_frontend
 
 app = FastAPI(title=settings.app_name, version='0.1.0')
 
@@ -120,3 +121,6 @@ async def websocket_chat(websocket: WebSocket) -> None:
             await websocket.send_json(result)
     except WebSocketDisconnect:
         return
+
+
+mount_frontend(app, resolve_backend_path(settings.frontend_dist_path))

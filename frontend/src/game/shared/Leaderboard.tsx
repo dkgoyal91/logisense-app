@@ -15,7 +15,7 @@ export function Leaderboard({ title, entries, revealFromBottom = false }: Props)
           {entries.map((entry, index) => (
             <li
               key={entry.name}
-              className={revealFromBottom ? 'board-row reveal' : 'board-row'}
+              className={revealFromBottom ? 'board-row board-row--rise' : 'board-row'}
               style={revealFromBottom ? { animationDelay: `${(entries.length - index) * REVEAL_STEP_SECONDS}s` } : undefined}
             >
               <span className="board-rank">{index + 1}</span>

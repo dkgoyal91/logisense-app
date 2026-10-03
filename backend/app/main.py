@@ -12,6 +12,7 @@ from app.database import initialize_database
 from app.game.routes import get_service as get_game_service
 from app.game.routes import router as game_router
 from app.sql_service import get_dashboard_snapshot, get_filter_options, get_live_table_rows
+from app.public_access import install_public_allowlist
 from app.static_site import mount_frontend
 
 app = FastAPI(title=settings.app_name, version='0.1.0')
@@ -27,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(game_router)
+install_public_allowlist(app, settings.game_public_url)
 get_game_service()
 
 

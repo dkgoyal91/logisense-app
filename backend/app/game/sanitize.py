@@ -6,11 +6,18 @@ from app.game.models import GameError
 
 MIN_NAME_LENGTH = 2
 MAX_NAME_LENGTH = 20
-BLOCKED_WORDS = frozenset({
-    'arse', 'asshole', 'bastard', 'bitch', 'bollocks', 'cock', 'crap', 'cunt', 'dick',
-    'fuck', 'fucker', 'hitler', 'nazi', 'piss', 'prick', 'shit', 'slut', 'twat', 'wanker', 'whore',
+# Strong words are caught even inside other words ("ShitHead"); mild ones only as whole words ("Peacock" is fine).
+STRONG_WORDS = frozenset({
+    'asshole', 'bastard', 'bitch', 'bollocks', 'cunt', 'dick', 'fuck', 'hitler', 'nazi', 'shit', 'slut',
+    'twat', 'wank', 'whore',
+})
+MILD_WORDS = frozenset({'arse', 'cock', 'crap', 'piss', 'prick'})
+ALLOWED_WORDS = frozenset({
+    'arsenal', 'cockburn', 'dickens', 'essex', 'hancock', 'middlesex', 'scunthorpe', 'sussex',
 })
 WORD_PATTERN = re.compile(r'[A-Za-z]+')
+STRONG_PATTERN = re.compile('|'.join(sorted(STRONG_WORDS, key=len, reverse=True)), re.IGNORECASE)
+ZERO_WIDTH_CHARACTERS = dict.fromkeys(map(ord, '\u200b\u200c\u200d\u2060\ufeff'))
 
 
 def clean_name(raw: str) -> str:
@@ -40,11 +47,18 @@ def clean_free_text(raw: str, max_length: int) -> str:
 
 
 def _collapse_whitespace(raw: str) -> str:
-    return ' '.join(str(raw or '').split())
+    return ' '.join(str(raw or '').translate(ZERO_WIDTH_CHARACTERS).split())
 
 
 def _contains_blocked_word(text: str) -> bool:
-    return any(word.lower() in BLOCKED_WORDS for word in WORD_PATTERN.findall(text))
+    return any(_is_offensive(word) for word in WORD_PATTERN.findall(text))
+
+
+def _is_offensive(word: str) -> bool:
+    lowered = word.lower()
+    if lowered in ALLOWED_WORDS:
+        return False
+    return lowered in MILD_WORDS or STRONG_PATTERN.search(lowered) is not None
 
 
 def _mask_blocked_words(text: str) -> str:
@@ -53,7 +67,16 @@ def _mask_blocked_words(text: str) -> str:
 
 def _mask_if_blocked(match: re.Match[str]) -> str:
     word = match.group()
-    return '*' * len(word) if word.lower() in BLOCKED_WORDS else word
+    lowered = word.lower()
+    if lowered in ALLOWED_WORDS:
+        return word
+    if lowered in MILD_WORDS:
+        return _stars(word)
+    return STRONG_PATTERN.sub(lambda found: _stars(found.group()), word)
+
+
+def _stars(text: str) -> str:
+    return '*' * len(text)
 
 
 def _with_suffix(name: str, suffix: int) -> str:

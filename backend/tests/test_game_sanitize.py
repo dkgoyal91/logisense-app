@@ -38,3 +38,20 @@ def test_clean_free_text_masks_blocked_words_and_truncates() -> None:
 def test_clean_free_text_rejects_blank_input() -> None:
     with pytest.raises(GameError, match='type something'):
         clean_free_text('   ', 200)
+
+
+@pytest.mark.parametrize('name', ['ShitHead', 'fuckoff', 'BigDick99', 'fu​ck you'])
+def test_clean_name_rejects_strong_words_hidden_inside_names(name: str) -> None:
+    with pytest.raises(GameError, match='different name'):
+        clean_name(name)
+
+
+@pytest.mark.parametrize('name', ['Dickens', 'Arsenal Fan', 'Scunthorpe', 'Peacock', 'Sparse Matrix'])
+def test_clean_name_allows_innocent_words(name: str) -> None:
+    assert clean_name(name) == name
+
+
+def test_clean_free_text_masks_strong_word_substrings_and_zero_width_tricks() -> None:
+    assert clean_free_text('you ShitHead', 200) == 'you ****Head'
+    assert clean_free_text('fu​ck this', 200) == '**** this'
+    assert clean_free_text('parse the Dickens novel', 200) == 'parse the Dickens novel'

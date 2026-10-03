@@ -48,7 +48,7 @@ class Player:
     demo_points: int = 0
     streak: int = 0
     attacks_scored: int = 0
-    last_attack_at: float = 0.0
+    last_attack_at: float | None = None
     race_finished_at: float | None = None
     kicked: bool = False
 

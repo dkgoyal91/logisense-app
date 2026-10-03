@@ -1,6 +1,6 @@
-import type { HostAction, HostView, Phase } from '../types.ts'
+import type { HostAction, HostExtras, HostView, Phase } from '../types.ts'
 
-export type Act = (action: HostAction, extra?: { player_id?: string; attack_id?: string; question_id?: string; confirm?: string }) => void
+export type Act = (action: HostAction, extra?: HostExtras) => void
 
 const NEXT_LABELS: Record<Phase, string> = {
   lobby: 'Start Round 1',
@@ -27,14 +27,14 @@ export function HostControls({ view, act }: { view: HostView; act: Act }) {
         type="button"
         className="primary big"
         disabled={view.phase === 'finale'}
-        onClick={() => act(isOpen ? 'reveal' : 'next')}
+        onClick={() => act(isOpen ? 'reveal' : 'next', { expected_phase: view.phase })}
       >
         {NEXT_LABELS[view.phase]}
       </button>
       {!view.race.started && (
         <button type="button" onClick={() => act('start_race')}>🏁 Start build race</button>
       )}
-      <button type="button" disabled={view.phase === 'finale'} onClick={() => act('skip')}>
+      <button type="button" disabled={view.phase === 'finale'} onClick={() => act('skip', { expected_phase: view.phase })}>
         {skipLabel(view.phase)}
       </button>
       <button type="button" onClick={() => act('hands_mode')}>

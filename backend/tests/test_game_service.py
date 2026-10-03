@@ -53,3 +53,30 @@ def test_player_bursts_are_coalesced_for_show_and_host(tmp_path: Path) -> None:
     assert 1 <= len(show_updates) < 5
     assert show_updates[-1]['view']['lobby']['count'] == 5
     assert all(socket.sent[-1]['view']['me'] is not None for socket in actors)
+
+
+def test_double_tapped_next_is_rejected_once_the_game_moved_on(tmp_path: Path) -> None:
+    from app.game.models import Phase
+
+    async def scenario():
+        service = _service(tmp_path)
+        service.state.phase = Phase.BREAK_IT_OPEN
+        host, connection = await _connect(service, 'host')
+        tap = {'type': 'host', 'action': 'next', 'expected_phase': 'break_it_open'}
+        await service.handle_host(connection, tap)
+        await service.handle_host(connection, dict(tap))
+        return service, host
+
+    service, host = asyncio.run(scenario())
+    assert service.state.phase is Phase.BREAK_IT_CLOSED
+    assert host.sent[-1] == {'type': 'error', 'message': 'The game already moved on.'}
+
+
+def test_host_actions_without_expected_phase_still_work(tmp_path: Path) -> None:
+    async def scenario():
+        service = _service(tmp_path)
+        _host, connection = await _connect(service, 'host')
+        await service.handle_host(connection, {'type': 'host', 'action': 'next'})
+        return service
+
+    assert asyncio.run(scenario()).state.phase.value == 'question_open'

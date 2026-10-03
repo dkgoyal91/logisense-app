@@ -87,6 +87,14 @@ export type HostAction =
   | 'hands_mode'
   | 'reset'
 
+export type HostExtras = {
+  player_id?: string
+  attack_id?: string
+  question_id?: string
+  confirm?: string
+  expected_phase?: Phase
+}
+
 export type ClientMessage =
   | { type: 'join'; name: string; token?: string }
   | { type: 'answer'; option: number }
@@ -94,7 +102,7 @@ export type ClientMessage =
   | { type: 'race_done' }
   | { type: 'bonus_question'; text: string }
   | { type: 'bonus_vote'; question_id: string }
-  | { type: 'host'; action: HostAction; player_id?: string; attack_id?: string; question_id?: string; confirm?: string }
+  | ({ type: 'host'; action: HostAction } & HostExtras)
 
 export type ServerMessage = { type: 'state'; view: unknown } | { type: 'error'; message: string }
 

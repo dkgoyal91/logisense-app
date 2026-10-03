@@ -164,7 +164,14 @@ class GameService:
         handler = self._host_handlers().get(str(message.get('action')))
         if handler is None:
             raise GameError('Unknown host action.')
+        self._check_expected_phase(message)
         handler(message)
+
+    def _check_expected_phase(self, message: Message) -> None:
+        """A double-tapped Next/Reveal/Skip carries the phase it was tapped in; reject it once the game moved on."""
+        expected = message.get('expected_phase')
+        if expected is not None and expected != self.state.phase.value:
+            raise GameError('The game already moved on.')
 
     def _host_handlers(self) -> dict[str, HostHandler]:
         question_count = len(self._questions)

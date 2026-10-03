@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 SEND_TIMEOUT_SECONDS = 2.0
+CLOSE_TIMEOUT_SECONDS = 1.0
+SERVER_ERROR_CLOSE_CODE = 1011
 
 
 @dataclass(eq=False)
@@ -47,5 +49,13 @@ class Hub:
     async def _send(self, connection: Connection, payload: dict[str, Any]) -> None:
         try:
             await asyncio.wait_for(connection.socket.send_json(payload), SEND_TIMEOUT_SECONDS)
-        except Exception:  # A dead or stalled socket must never block the show; the client reconnects.
-            self.remove(connection)
+        except Exception:  # A dead or stalled socket must never block the show.
+            await self._drop(connection)
+
+    async def _drop(self, connection: Connection) -> None:
+        """Forget the connection and close its socket, so the client notices and reconnects."""
+        self.remove(connection)
+        try:
+            await asyncio.wait_for(connection.socket.close(code=SERVER_ERROR_CLOSE_CODE), CLOSE_TIMEOUT_SECONDS)
+        except Exception:  # Already closed or unreachable: nothing more to do.
+            pass

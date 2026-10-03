@@ -15,6 +15,7 @@ from app.game.models import GameError, GameState, Question
 from app.game.persistence import SnapshotStore
 
 RESET_CONFIRMATION = 'RESET'
+BROADCAST_INTERVAL_SECONDS = 0.3
 MALFORMED_MESSAGE = 'Malformed message.'
 
 Message = dict[str, Any]
@@ -36,6 +37,7 @@ class GameService:
         join_url: str,
         clock: Callable[[], float] = time.time,
         new_id: Callable[[], str] = _new_id,
+        broadcast_interval: float = BROADCAST_INTERVAL_SECONDS,
     ) -> None:
         self.hub = Hub()
         self.state = store.load() or GameState()
@@ -47,6 +49,8 @@ class GameService:
         self._clock = clock
         self._new_id = new_id
         self._lock = asyncio.Lock()
+        self._broadcast_interval = broadcast_interval
+        self._audience_publish: asyncio.Task[None] | None = None
 
     # Connections ---------------------------------------------------------------------------
 
@@ -61,20 +65,34 @@ class GameService:
         self.hub.remove(connection)
 
     async def handle_player(self, connection: Connection, message: Message) -> None:
-        await self._apply(connection, lambda: self._dispatch_player(connection, message), _show_host_and(connection))
+        if await self._apply(connection, lambda: self._dispatch_player(connection, message), _only(connection)):
+            self._schedule_audience_publish()
 
     async def handle_host(self, connection: Connection, message: Message) -> None:
         await self._apply(connection, lambda: self._dispatch_host(message), _everyone)
 
     # Apply + publish -----------------------------------------------------------------------
 
-    async def _apply(self, connection: Connection, mutate: Callable[[], None], audience: Audience) -> None:
+    async def _apply(self, connection: Connection, mutate: Callable[[], None], audience: Audience) -> bool:
         error = await self._mutate_and_save(mutate)
         if error is not None:
             await self.hub.send_error(connection, error)
-            return
+            return False
+        await self._publish(audience)
+        return True
+
+    async def _publish(self, audience: Audience) -> None:
         ctx = self._context()
         await self.hub.publish(lambda target: self._render(ctx, target), audience)
+
+    def _schedule_audience_publish(self) -> None:
+        """Coalesce projector and host updates after player actions: one publish per interval, latest state wins."""
+        if self._audience_publish is None or self._audience_publish.done():
+            self._audience_publish = asyncio.create_task(self._publish_audience_after_interval())
+
+    async def _publish_audience_after_interval(self) -> None:
+        await asyncio.sleep(self._broadcast_interval)
+        await self._publish(_show_and_host)
 
     async def _mutate_and_save(self, mutate: Callable[[], None]) -> str | None:
         async with self._lock:
@@ -173,7 +191,11 @@ def _everyone(_connection: Connection) -> bool:
     return True
 
 
-def _show_host_and(actor: Connection) -> Audience:
+def _show_and_host(connection: Connection) -> bool:
+    return connection.role != 'play'
+
+
+def _only(actor: Connection) -> Audience:
     def audience(connection: Connection) -> bool:
-        return connection.role != 'play' or connection is actor
+        return connection is actor
     return audience

@@ -42,3 +42,23 @@ def test_publish_only_reaches_the_audience() -> None:
 
     assert len(show_socket.sent) == 1
     assert play_socket.sent == []
+
+
+class StuckClosableSocket(StuckSocket):
+    def __init__(self) -> None:
+        self.closed_with: int | None = None
+
+    async def close(self, code: int = 1000) -> None:
+        self.closed_with = code
+
+
+def test_publish_closes_a_timed_out_socket_so_the_client_reconnects(monkeypatch) -> None:
+    monkeypatch.setattr(hub_module, 'SEND_TIMEOUT_SECONDS', 0.05)
+    hub = Hub()
+    socket = StuckClosableSocket()
+    hub.add(Connection(socket, 'host'))
+
+    asyncio.run(hub.publish(lambda _connection: {}, lambda _connection: True))
+
+    assert socket.closed_with == 1011
+    assert hub.size == 0

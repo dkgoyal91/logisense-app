@@ -103,3 +103,34 @@ def test_reset_needs_confirmation(client: TestClient) -> None:
         assert host.receive_json() == {'type': 'error', 'message': 'Type RESET to confirm.'}
         host.send_json({'type': 'host', 'action': 'reset', 'confirm': 'RESET'})
         assert _view(host)['phase'] == 'lobby'
+
+
+class SocketClosedByFailedSend:
+    """Starlette raises RuntimeError, not WebSocketDisconnect, once a failed send has closed the socket."""
+
+    async def accept(self) -> None:
+        return None
+
+    async def send_json(self, _payload: dict) -> None:
+        return None
+
+    async def receive_text(self) -> str:
+        raise RuntimeError('WebSocket is not connected. Need to call "accept" first.')
+
+
+def test_serve_treats_a_socket_closed_by_a_failed_send_as_a_disconnect(tmp_path: Path) -> None:
+    import asyncio
+
+    from app.game.hub import Connection
+
+    service = GameService(
+        questions=QUESTIONS, store=SnapshotStore(tmp_path / 'snapshot.json'), run_copilot=fake_copilot,
+        host_pin=PIN, join_url='',
+    )
+    routes.use_service(service)
+    socket = SocketClosedByFailedSend()
+    try:
+        asyncio.run(routes._serve(socket, Connection(socket, 'play'), service.handle_player))
+    finally:
+        routes.use_service(None)
+    assert service.hub.size == 0

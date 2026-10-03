@@ -92,11 +92,18 @@ async def _serve(websocket: WebSocket, connection: Connection, handle: Handler) 
 
 
 async def _receive_one(websocket: WebSocket, connection: Connection, handle: Handler) -> None:
-    message = _parse(await websocket.receive_text())
+    message = _parse(await _receive_text(websocket))
     if message is None:
         await get_service().hub.send_error(connection, 'Malformed message.')
         return
     await handle(connection, message)
+
+
+async def _receive_text(websocket: WebSocket) -> str:
+    try:
+        return await websocket.receive_text()
+    except RuntimeError as exc:  # Starlette's signal that a failed send already closed this socket.
+        raise WebSocketDisconnect() from exc
 
 
 def _parse(raw: str) -> dict[str, Any] | None:

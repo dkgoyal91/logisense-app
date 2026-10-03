@@ -21,6 +21,7 @@ from app.game.sanitize import clean_free_text, clean_name, unique_name
 
 ANSWER_GRACE_SECONDS = 1.5
 REMOVED_MESSAGE = 'You were removed by the host.'
+MAX_PLAYERS = 500
 ATTACK_COOLDOWN_SECONDS = 3.0
 MAX_ATTACK_LENGTH = 200
 MAX_BONUS_LENGTH = 120
@@ -52,6 +53,8 @@ def award_demo(state: GameState, player_id: str) -> None:
 
 
 def _add_player(state: GameState, raw_name: str, new_id: str, new_token: str) -> Player:
+    if len(state.players) >= MAX_PLAYERS:
+        raise GameError('The game is full.')
     taken = {player.name for player in state.players.values()}
     player = Player(id=new_id, token=new_token, name=unique_name(clean_name(raw_name), taken))
     state.players[player.id] = player

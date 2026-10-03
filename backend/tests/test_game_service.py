@@ -80,3 +80,39 @@ def test_host_actions_without_expected_phase_still_work(tmp_path: Path) -> None:
         return service
 
     assert asyncio.run(scenario()).state.phase.value == 'question_open'
+
+
+def test_second_join_on_a_bound_connection_keeps_the_same_player(tmp_path: Path) -> None:
+    async def scenario():
+        service = _service(tmp_path)
+        _socket, connection = await _connect(service, 'play')
+        await service.handle_player(connection, {'type': 'join', 'name': 'Ada'})
+        first_id = connection.player_id
+        await service.handle_player(connection, {'type': 'join', 'name': 'Ada'})
+        return service, connection, first_id
+
+    service, connection, first_id = asyncio.run(scenario())
+    assert len(service.state.players) == 1
+    assert connection.player_id == first_id
+
+
+def test_game_refuses_new_players_when_full_but_lets_existing_ones_rejoin(tmp_path: Path, monkeypatch) -> None:
+    from app.game import engine
+
+    monkeypatch.setattr(engine, 'MAX_PLAYERS', 1)
+
+    async def scenario():
+        service = _service(tmp_path)
+        _ada_socket, ada = await _connect(service, 'play')
+        await service.handle_player(ada, {'type': 'join', 'name': 'Ada'})
+        token = service.state.players[ada.player_id].token
+        bob_socket, bob = await _connect(service, 'play')
+        await service.handle_player(bob, {'type': 'join', 'name': 'Bob'})
+        _again_socket, again = await _connect(service, 'play')
+        await service.handle_player(again, {'type': 'join', 'name': 'Ada', 'token': token})
+        return service, bob_socket, again, ada
+
+    service, bob_socket, again, ada = asyncio.run(scenario())
+    assert bob_socket.sent[-1] == {'type': 'error', 'message': 'The game is full.'}
+    assert again.player_id == ada.player_id
+    assert len(service.state.players) == 1

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useGameSocket, type GameSocket } from '../hooks/useGameSocket.ts'
 import { loadSavedPlayer, savePlayer } from '../lib/storage.ts'
 import { ErrorToast } from '../shared/ErrorToast.tsx'
@@ -26,14 +26,19 @@ function useRememberPlayer(me: Me | null): void {
   }, [name, token])
 }
 
+// While a saved token is on its way back, a tap on Join would create a duplicate player and lose the score.
+const isRejoining = (hasSavedPlayer: boolean, error: string | null): boolean => hasSavedPlayer && error === null
+
 const showRaceButton = (view: PlayerView, me: Me): boolean => view.race_started && !me.race_done && view.phase !== 'finale'
 
 export function PlayScreen() {
   const socket = useGameSocket<PlayerView>('play', rejoinSavedPlayer)
   const { view, send, error, clearError } = socket
+  const [hasSavedPlayer] = useState(() => loadSavedPlayer() !== null)
   useRememberPlayer(view?.me ?? null)
 
   if (!view) return <p className="centered">Connecting…</p>
+  if (!view.me && isRejoining(hasSavedPlayer, error)) return <p className="centered">Rejoining…</p>
   if (!view.me) return <div className="play"><JoinForm onJoin={(name) => send({ type: 'join', name })} error={error} /></div>
   if (view.me.kicked) return <p className="centered">You were removed by the host.</p>
 

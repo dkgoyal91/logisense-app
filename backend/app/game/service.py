@@ -137,11 +137,18 @@ class GameService:
         }
 
     def _join(self, connection: Connection, message: Message) -> None:
+        if self._is_bound_to_active_player(connection):
+            return
         token = message.get('token')
         player = engine.join(
             self.state, str(message.get('name', '')), token if isinstance(token, str) else None, self._new_id(), self._new_id(),
         )
         connection.player_id = player.id
+
+    def _is_bound_to_active_player(self, connection: Connection) -> bool:
+        """A repeated join on a connection that already has a player must not create a second one."""
+        player = self.state.players.get(connection.player_id or '')
+        return player is not None and not player.kicked
 
     def _answer(self, player_id: str | None, message: Message) -> None:
         engine.submit_answer(self.state, player_id, int(message['option']), self._clock())

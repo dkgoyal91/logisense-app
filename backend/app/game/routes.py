@@ -1,0 +1,116 @@
+"""WebSocket endpoints for the projector, phones and the host remote."""
+from __future__ import annotations
+
+import json
+import secrets
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+from app.config import resolve_backend_path, settings
+from app.database import get_connection
+from app.game.hub import Connection
+from app.game.persistence import SnapshotStore
+from app.game.questions import build_questions, load_shipment_counts
+from app.game.reveal import run_copilot
+from app.game.service import GameService
+
+POLICY_VIOLATION = 1008
+
+router = APIRouter()
+_service: GameService | None = None
+
+Handler = Callable[[Connection, dict[str, Any]], Awaitable[None]]
+
+
+def get_service() -> GameService:
+    global _service
+    if _service is None:
+        _service = create_service()
+    return _service
+
+
+def use_service(service: GameService | None) -> None:
+    global _service
+    _service = service
+
+
+def create_service() -> GameService:
+    pin = settings.game_host_pin or f'{secrets.randbelow(10**6):06d}'
+    print(f'[game] Host remote: /host?pin={pin}', flush=True)
+    return GameService(
+        questions=_load_questions(),
+        store=SnapshotStore(resolve_backend_path(settings.game_snapshot_path)),
+        run_copilot=run_copilot,
+        host_pin=pin,
+        join_url=_join_url(),
+    )
+
+
+def _load_questions():
+    with get_connection() as connection:
+        counts = load_shipment_counts(connection)
+    return build_questions(run_copilot, counts)
+
+
+def _join_url() -> str:
+    base = settings.game_public_url.rstrip('/')
+    return f'{base}/play' if base else ''
+
+
+@router.websocket('/ws/game/show')
+async def show_socket(websocket: WebSocket) -> None:
+    await _serve(websocket, Connection(websocket, 'show'), _ignore)
+
+
+@router.websocket('/ws/game/play')
+async def play_socket(websocket: WebSocket) -> None:
+    await _serve(websocket, Connection(websocket, 'play'), get_service().handle_player)
+
+
+@router.websocket('/ws/game/host')
+async def host_socket(websocket: WebSocket) -> None:
+    service = get_service()
+    if not service.is_host_pin(websocket.query_params.get('pin')):
+        await _reject(websocket)
+        return
+    await _serve(websocket, Connection(websocket, 'host'), service.handle_host)
+
+
+async def _serve(websocket: WebSocket, connection: Connection, handle: Handler) -> None:
+    service = get_service()
+    await websocket.accept()
+    await service.connect(connection)
+    try:
+        while True:
+            await _receive_one(websocket, connection, handle)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        service.disconnect(connection)
+
+
+async def _receive_one(websocket: WebSocket, connection: Connection, handle: Handler) -> None:
+    message = _parse(await websocket.receive_text())
+    if message is None:
+        await get_service().hub.send_error(connection, 'Malformed message.')
+        return
+    await handle(connection, message)
+
+
+def _parse(raw: str) -> dict[str, Any] | None:
+    try:
+        message = json.loads(raw)
+    except ValueError:
+        return None
+    return message if isinstance(message, dict) else None
+
+
+async def _reject(websocket: WebSocket) -> None:
+    await websocket.accept()
+    await websocket.close(code=POLICY_VIOLATION)
+
+
+async def _ignore(_connection: Connection, _message: dict[str, Any]) -> None:
+    return None

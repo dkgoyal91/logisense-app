@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from app.chat_agent import process_chat_turn
 from app.config import settings
 from app.database import initialize_database
+from app.game.routes import get_service as get_game_service
+from app.game.routes import router as game_router
 from app.sql_service import get_dashboard_snapshot, get_filter_options, get_live_table_rows
 
 app = FastAPI(title=settings.app_name, version='0.1.0')
@@ -22,6 +24,9 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
 )
+
+app.include_router(game_router)
+get_game_service()
 
 
 class ChatMessage(BaseModel):

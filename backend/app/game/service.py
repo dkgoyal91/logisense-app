@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import secrets
 import time
 import uuid
 from collections.abc import Callable
@@ -10,6 +9,7 @@ from typing import Any
 
 from app.game import engine, views
 from app.game.guard import classify_attack
+from app.game.host_pin import HostPinGuard
 from app.game.hub import Audience, Connection, Hub
 from app.game.models import GameError, GameState, Question
 from app.game.persistence import SnapshotStore
@@ -44,7 +44,7 @@ class GameService:
         self._questions = questions
         self._store = store
         self._run_copilot = run_copilot
-        self._host_pin = host_pin
+        self._host_pin = HostPinGuard(host_pin, clock)
         self._join_url = join_url
         self._clock = clock
         self._new_id = new_id
@@ -55,7 +55,7 @@ class GameService:
     # Connections ---------------------------------------------------------------------------
 
     def is_host_pin(self, pin: str | None) -> bool:
-        return bool(pin) and secrets.compare_digest(str(pin), self._host_pin)
+        return self._host_pin.accepts(pin)
 
     async def connect(self, connection: Connection) -> None:
         self.hub.add(connection)

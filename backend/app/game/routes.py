@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import secrets
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -10,6 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.config import resolve_backend_path, settings
 from app.database import get_connection
+from app.game.host_pin import resolve_host_pin
 from app.game.hub import Connection
 from app.game.persistence import SnapshotStore
 from app.game.questions import build_questions, load_shipment_counts
@@ -37,7 +37,7 @@ def use_service(service: GameService | None) -> None:
 
 
 def create_service() -> GameService:
-    pin = settings.game_host_pin or f'{secrets.randbelow(10**6):06d}'
+    pin = resolve_host_pin(settings.game_host_pin)
     print(f'[game] Host remote: /host?pin={pin}', flush=True)
     return GameService(
         questions=_load_questions(),

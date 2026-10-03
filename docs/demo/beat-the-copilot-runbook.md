@@ -4,14 +4,14 @@
 1. `cd frontend && npm install && npm run build`
 2. `cd backend && rm -f data/game_snapshot.json`
 3. Rehearse with bots (two terminals):
-   - `cd backend && GAME_HOST_PIN=1234 ../.venv/bin/python -m uvicorn app.main:app --port 8000`
-   - `.venv/bin/python scripts/game_bots.py --bots 300 --pin 1234 --drive-host`
+   - `cd backend && GAME_HOST_PIN=rehearsal-pin-1234 ../.venv/bin/python -m uvicorn app.main:app --port 8000`
+   - `.venv/bin/python scripts/game_bots.py --bots 300 --pin rehearsal-pin-1234 --drive-host`
    Every phase must reach 300 bots in under 1 s.
 4. `rm -f backend/data/game_snapshot.json` again so the real show starts clean.
 
 ## On stage (30 minutes before)
 1. Start the tunnel: `cloudflared tunnel --url http://localhost:8000`; copy the `https://….trycloudflare.com` URL.
-2. Start the backend with that URL and a PIN only you know:
+2. Start the backend with that URL and a long PIN only you know (8+ characters, e.g. three random words; the server refuses shorter PINs and locks the host remote for 60 s after 10 wrong guesses):
    `cd backend && GAME_PUBLIC_URL=https://….trycloudflare.com GAME_HOST_PIN=<pin> ../.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000`
 3. Projector browser (full screen): `http://localhost:8000/show`
 4. Your phone: `https://….trycloudflare.com/host?pin=<pin>`

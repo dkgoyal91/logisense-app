@@ -268,10 +268,19 @@ export function Dashboard({ apiBaseUrl, kpis }: { apiBaseUrl: string; kpis: Dash
       </div>
 
       <div className="dashboard-table-wrap">
+        {isLoading && rows.length > 0 ? (
+          <div className="dashboard-table-status" aria-live="polite" aria-busy="true">
+            <span className="loading-spinner loading-spinner--sm" aria-hidden="true" />
+            <span>Refreshing records…</span>
+          </div>
+        ) : null}
         {errorMessage ? (
           <div className="dashboard-table-empty">{errorMessage}</div>
         ) : isLoading && rows.length === 0 ? (
-          <div className="dashboard-table-empty">Loading records…</div>
+          <div className="dashboard-table-empty dashboard-table-loading" aria-live="polite" aria-busy="true">
+            <span className="loading-spinner loading-spinner--sm" aria-hidden="true" />
+            <span>Loading records…</span>
+          </div>
         ) : rows.length === 0 ? (
           <div className="dashboard-table-empty">No records match your search or filters.</div>
         ) : (

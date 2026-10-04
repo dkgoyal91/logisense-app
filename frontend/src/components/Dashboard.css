@@ -193,6 +193,15 @@
   max-height: 52vh;
 }
 
+.dashboard-table-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 14px 0;
+  color: var(--ls-text-secondary);
+  font-size: var(--ls-text-sm);
+}
+
 .dashboard-table {
   width: 100%;
   border-collapse: collapse;
@@ -233,6 +242,15 @@
   text-align: center;
   color: var(--ls-text-muted);
   font-size: var(--ls-text-base);
+}
+
+.dashboard-table-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 120px;
+  width: 100%;
 }
 
 .dashboard-pagination-bar {

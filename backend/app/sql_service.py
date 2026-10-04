@@ -36,7 +36,12 @@ ALLOWED_TABLES: dict[str, set[str]] = {
         'route',
         'origin',
         'destination',
+        'source_location',
+        'destination_location',
         'status',
+        'route_start_date',
+        'planned_delivery_date',
+        'actual_delivery_date',
         'delivery_date',
         'weight_kg',
         'value_usd',
@@ -53,7 +58,7 @@ ALLOWED_TABLES: dict[str, set[str]] = {
 TABLE_DEFAULT_ORDER: dict[str, str] = {
     'logistics_records': 'review_date DESC',
     'jobs': 'days_open DESC',
-    'shipments': 'delivery_date DESC',
+    'shipments': 'COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) DESC',
     'vehicles': 'utilization_pct DESC',
 }
 
@@ -61,11 +66,17 @@ TABLE_DEFAULT_ORDER: dict[str, str] = {
 FILTERABLE_COLUMNS: dict[str, list[str]] = {
     'logistics_records': ['status', 'region'],
     'jobs': ['status', 'region', 'current_stage'],
-    'shipments': ['status', 'origin', 'destination'],
+    'shipments': ['status', 'source_location', 'destination_location', 'origin', 'destination'],
     'vehicles': ['status', 'depot'],
 }
 
 MAX_PAGE_SIZE = 200
+
+READ_ONLY_SQL_PATTERN = re.compile(r'^\s*SELECT\b', re.IGNORECASE)
+FORBIDDEN_SQL_PATTERN = re.compile(
+    r'(?i)\b(drop|delete|update|insert|alter|truncate|grant|revoke|create|attach|detach|replace|execute|pragma|vacuum)\b'
+)
+TABLE_REFERENCE_PATTERN = re.compile(r'\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)', re.IGNORECASE)
 
 # Approximate UK city centroids used to plot map markers for location-bearing rows.
 CITY_COORDINATES: dict[str, tuple[float, float]] = {
@@ -80,7 +91,7 @@ CITY_COORDINATES: dict[str, tuple[float, float]] = {
 }
 
 LOCATION_COLUMN_BY_TABLE: dict[str, str] = {
-    'shipments': 'destination',
+    'shipments': 'destination_location',
     'logistics_records': 'region',
     'jobs': 'region',
     'vehicles': 'depot',
@@ -121,6 +132,41 @@ def _extract_name(message: str) -> str | None:
 
 def _resolve_runtime_table_name(table_name: str) -> str:
     return table_name
+
+
+def _extract_route_direction(message: str) -> tuple[str | None, str | None]:
+    pattern = re.compile(
+        r'(?i)\b(?:route|shipment|shipments)?\s*(?:from|origin)\s+([A-Za-z][A-Za-z .-]+?)\s+(?:to|->|destination|for|and)\s+([A-Za-z][A-Za-z .-]+)'
+    )
+    match = pattern.search(message)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+
+    pattern = re.compile(
+        r'(?i)\b(?:from|origin)\s+([A-Za-z][A-Za-z .-]+)\s*(?:to|->|destination)\s+([A-Za-z][A-Za-z .-]+)'
+    )
+    match = pattern.search(message)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return None, None
+
+
+def _extract_customer_filter(message: str) -> str | None:
+    patterns = [
+        r'(?i)\b(?:for|customer|customer is|customer name)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+        r'(?i)\bshow\s+(?:all\s+)?(?:shipments|delivery|loads)?\s*(?:for|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message)
+        if match:
+            value = match.group(1).strip()
+            lowered = value.lower()
+            if lowered in {'route', 'shipment', 'shipments', 'delivery', 'deliveries', 'customer'}:
+                return None
+            if any(token in lowered for token in ['source', 'destination', 'location', 'route']):
+                return None
+            return value
+    return None
 
 
 def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[Any]]:
@@ -176,23 +222,64 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
         )
 
     if table_name == 'shipments':
+        origin, destination = _extract_route_direction(message)
+        if origin and destination:
+            return (
+                f"SELECT {columns} FROM shipments WHERE origin = ? AND destination = ? ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) ASC LIMIT ?",
+                [origin.strip().title(), destination.strip().title(), settings.row_limit],
+            )
+
+        customer_filter = _extract_customer_filter(message)
+        if customer_filter:
+            return (
+                f"SELECT {columns} FROM shipments WHERE customer = ? ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) DESC LIMIT ?",
+                [customer_filter, settings.row_limit],
+            )
+
         if 'delayed' in lower_message:
             return (
-                f"SELECT {columns} FROM shipments WHERE status = ? ORDER BY delivery_date ASC LIMIT ?",
+                f"SELECT {columns} FROM shipments WHERE status = ? ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) ASC LIMIT ?",
                 ['Delayed', settings.row_limit],
             )
         if 'delivered' in lower_message:
             return (
-                f"SELECT {columns} FROM shipments WHERE status = ? ORDER BY delivery_date DESC LIMIT ?",
+                f"SELECT {columns} FROM shipments WHERE status = ? ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) DESC LIMIT ?",
                 ['Delivered', settings.row_limit],
+            )
+        if 'source' in lower_message and 'destination' in lower_message:
+            generic_view_request = (
+                'source location' in lower_message
+                and 'destination location' in lower_message
+                and ' and ' in lower_message
+                and not any(term in lower_message for term in [' from ', ' to ', ' is ', 'between'])
+            )
+            if not generic_view_request:
+                source_match = re.search(r'source(?:\s+location)?\s+(?:is\s+)?([A-Za-z ]+?)(?:\s+to\s+|\s+destination|$)', lower_message)
+                destination_match = re.search(r'destination(?:\s+location)?\s+(?:is\s+)?([A-Za-z ]+?)(?:\s+for\s+|\s+from\s+|$)', lower_message)
+                source_value = source_match.group(1).strip() if source_match else ''
+                destination_value = destination_match.group(1).strip() if destination_match else ''
+                if source_value and destination_value and source_value.lower() not in {'and', 'to', 'from'} and destination_value.lower() not in {'and', 'to', 'from'}:
+                    return (
+                        f"SELECT {columns} FROM shipments WHERE source_location = ? AND destination_location = ? ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) ASC LIMIT ?",
+                        [source_value.title(), destination_value.title(), settings.row_limit],
+                    )
+        if 'route start' in lower_message or 'start date' in lower_message:
+            return (
+                f"SELECT {columns} FROM shipments ORDER BY route_start_date ASC LIMIT ?",
+                [settings.row_limit],
+            )
+        if 'actual delivery' in lower_message or 'delivery date' in lower_message:
+            return (
+                f"SELECT {columns} FROM shipments ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) ASC LIMIT ?",
+                [settings.row_limit],
             )
         if 'route' in lower_message:
             return (
-                f"SELECT {columns} FROM shipments ORDER BY delivery_date ASC LIMIT ?",
+                f"SELECT {columns} FROM shipments ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) ASC LIMIT ?",
                 [settings.row_limit],
             )
         return (
-            f"SELECT {columns} FROM shipments ORDER BY delivery_date ASC LIMIT ?",
+            f"SELECT {columns} FROM shipments ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) ASC LIMIT ?",
             [settings.row_limit],
         )
 
@@ -215,29 +302,81 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
 
 def detect_table_from_message(message: str) -> str | None:
     lower_message = message.lower()
-    if any(term in lower_message for term in ['pipeline', 'logistics pipeline', 'record', 'records', 'projects', 'client', 'valuation', 'review date', 'operations lead', 'logistics owner', 'salesforce', 'properties', 'route count', 'logistics records', 'record set']):
+
+    if any(
+        term in lower_message
+        for term in [
+            'add route',
+            'create route',
+            'new route',
+            'plan route',
+            'schedule route',
+            'route from',
+            'route to',
+            'route between',
+        ]
+    ):
+        return 'shipments'
+
+    if any(
+        term in lower_message
+        for term in [
+            'pipeline',
+            'logistics pipeline',
+            'record',
+            'records',
+            'projects',
+            'client',
+            'valuation',
+            'review date',
+            'operations lead',
+            'logistics owner',
+            'salesforce',
+            'properties',
+            'route count',
+            'logistics records',
+            'record set',
+        ]
+    ):
         return 'logistics_records'
+
     if any(term in lower_message for term in ['job', 'jobs', 'work order', 'work orders', 'stage', 'progress', 'days open', 'current stage']):
         return 'jobs'
-    if any(term in lower_message for term in ['shipment', 'shipments', 'delivery', 'route', 'origin', 'destination', 'cargo']):
+
+    if any(
+        term in lower_message
+        for term in ['shipment', 'shipments', 'delivery', 'route', 'origin', 'destination', 'source location', 'destination location', 'route start date', 'actual delivery date', 'cargo']
+    ):
         return 'shipments'
+
     if any(term in lower_message for term in ['vehicle', 'vehicles', 'fleet', 'depot', 'maintenance', 'utilization']):
         return 'vehicles'
+
     return None
 
 
 def _validate_sql(sql: str) -> None:
-    if not sql or ';' in sql:
+    normalized_sql = (sql or '').strip()
+
+    if not normalized_sql or ';' in normalized_sql:
         raise ValueError('Only a single read-only statement is allowed.')
-    forbidden = re.compile(r'(?i)\b(drop|delete|update|insert|alter|truncate|grant|revoke|create|attach|detach|replace|execute)\b')
-    if forbidden.search(sql):
+
+    if not READ_ONLY_SQL_PATTERN.match(normalized_sql):
+        raise ValueError('Only SELECT statements are allowed.')
+
+    if '--' in normalized_sql or '/*' in normalized_sql or '*/' in normalized_sql:
+        raise ValueError('SQL comments are not allowed.')
+
+    if FORBIDDEN_SQL_PATTERN.search(normalized_sql):
         raise ValueError('Unsafe SQL detected.')
-    match = re.search(r'\bFROM\s+([A-Za-z_]+)', sql, flags=re.IGNORECASE)
-    if not match:
+
+    table_names = {match.group(1).lower() for match in TABLE_REFERENCE_PATTERN.finditer(normalized_sql)}
+    if not table_names:
         raise ValueError('Missing table reference in query.')
-    table_name = match.group(1).lower()
-    if table_name not in ALLOWED_TABLES:
-        raise ValueError(f'Table {table_name} is not allowed.')
+
+    disallowed_tables = sorted(table_name for table_name in table_names if table_name not in ALLOWED_TABLES)
+    if disallowed_tables:
+        raise ValueError(f'Table {disallowed_tables[0]} is not allowed.')
 
 
 def execute_safe_query(message: str, table_hint: str | None = None) -> dict[str, Any]:
@@ -292,9 +431,10 @@ def get_dashboard_snapshot() -> dict[str, Any]:
             dict(row)
             for row in connection.execute(
                 """
-                SELECT shipment_id, customer, origin, destination, status, delivery_date, weight_kg, value_usd
+                SELECT shipment_id, customer, source_location, destination_location, route_start_date,
+                       planned_delivery_date, actual_delivery_date, status, delivery_date, weight_kg, value_usd
                 FROM shipments
-                ORDER BY delivery_date DESC
+                ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) DESC
                 LIMIT 12
                 """
             ).fetchall()

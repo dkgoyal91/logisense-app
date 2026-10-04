@@ -81,6 +81,33 @@ def test_shipment_queries_filter_by_customer_name() -> None:
     assert all(row['customer'] == 'HarborSpan Distribution' for row in result['rows'])
 
 
+def test_generic_search_matches_person_name_across_columns() -> None:
+    initialize_database()
+
+    for message in [
+        'Show all data for Mike Jones',
+        'show me all data for Mike Jones',
+        'show me all records for Mike Jones',
+    ]:
+        result = execute_safe_query(message)
+
+        assert result['table'] == 'logistics_records'
+        assert result['rows']
+        assert any('Mike Jones' in str(row.get('logistics_owner', '')) for row in result['rows'])
+        assert 'LIKE ?' in str(result['sql']).upper()
+
+
+def test_shipment_queries_filter_by_related_to_customer_name() -> None:
+    initialize_database()
+
+    result = execute_safe_query('Show all shipment related to Crimson Fleet Services')
+
+    assert result['table'] == 'shipments'
+    assert result['rows'] == []
+    assert result['sql']
+    assert 'like ?' in str(result['sql']).lower()
+
+
 def test_chat_turn_handles_route_creation_requests_as_route_planning() -> None:
     initialize_database()
 
@@ -91,8 +118,12 @@ def test_chat_turn_handles_route_creation_requests_as_route_planning() -> None:
 
     assert result['table'] == 'shipments'
     assert result['rows'] == []
-    assert 'route' in str(result['answer']).lower()
-    assert 'Manchester' in str(result['answer']) or 'Leeds' in str(result['answer'])
+    summary_text = str(result['answer']).lower()
+    assert 'route' in summary_text
+    assert 'manchester' in summary_text
+    assert 'leeds' in summary_text
+    assert 'dispatch' in summary_text or 'capacity' in summary_text
+    assert 'no shipments are available' not in summary_text
 
 
 def test_chat_turn_rejects_prompt_injection_and_write_intent() -> None:

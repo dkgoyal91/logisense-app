@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover - graceful path when dependencies are no
     StateGraph = None
 
 from app.config import settings
-from app.sql_service import _extract_route_direction, detect_table_from_message, execute_safe_query
+from app.sql_service import _extract_customer_filter, _extract_route_direction, detect_table_from_message, execute_safe_query
 
 conversation_store: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
 # Remembers the last table each session queried, so follow-up questions ("show more of those")
@@ -62,12 +62,16 @@ def _sanitize_logistics_text(text: str) -> str:
     return sanitized
 
 
+def _is_route_planning_request(text: str) -> bool:
+    return bool(ROUTE_PLANNING_PATTERN.search(text.strip()))
+
+
 def _is_blocked_user_message(text: str) -> bool:
     normalized_text = text.strip()
     if not normalized_text:
         return False
 
-    if ROUTE_PLANNING_PATTERN.search(normalized_text):
+    if _is_route_planning_request(normalized_text):
         return bool(
             PROMPT_INJECTION_PATTERN.search(normalized_text)
             or re.search(r'(?i)\b(?:drop|delete|update|insert|alter|truncate|grant|revoke|replace)\b', normalized_text)
@@ -140,7 +144,21 @@ def sql_agent(state: dict[str, Any]) -> dict[str, Any]:
     if table == 'shipments' and not rows:
         origin, destination = _extract_route_direction(user_message)
         if origin and destination:
+            if _is_route_planning_request(user_message):
+                route_plan = (
+                    f'Planned route: {origin} to {destination}. No live shipments currently match this corridor in the active dataset, '
+                    'so this should be treated as a new dispatch-planning proposal rather than an existing shipment record. '
+                    'Review capacity, vehicle readiness, and handoff timing before confirming the move.'
+                )
+                state['summary'] = route_plan
+                state['grounded_answer'] = _sanitize_logistics_text(route_plan)
+                return state
+
             state['summary'] = f'No shipments are available for the route from {origin} to {destination} in the current logistics dataset.'
+        else:
+            customer_filter = _extract_customer_filter(user_message)
+            if customer_filter:
+                state['summary'] = f'No shipments are currently associated with {customer_filter} in the active dataset.'
 
     preview = rows[:3]
     state['grounded_answer'] = _sanitize_logistics_text(

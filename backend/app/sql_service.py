@@ -153,8 +153,8 @@ def _extract_route_direction(message: str) -> tuple[str | None, str | None]:
 
 def _extract_customer_filter(message: str) -> str | None:
     patterns = [
-        r'(?i)\b(?:for|customer|customer is|customer name)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
-        r'(?i)\bshow\s+(?:all\s+)?(?:shipments|delivery|loads)?\s*(?:for|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+        r'(?i)\b(?:for|customer|customer is|customer name|related to|associated with)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+        r'(?i)\b(?:show|list|display|find|get)\s+(?:all\s+)?(?:shipments?|deliveries?|loads?)?\s*(?:related to|associated with|for|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
     ]
     for pattern in patterns:
         match = re.search(pattern, message)
@@ -167,6 +167,40 @@ def _extract_customer_filter(message: str) -> str | None:
                 return None
             return value
     return None
+
+
+def _extract_generic_search_term(message: str) -> str | None:
+    patterns = [
+        r'(?i)\b(?:show\s+(?:me\s+)?|list\s+|display\s+|find\s+|get\s+|search\s+)\s*(?:all\s+)?(?:data|records?|shipments?|jobs?|vehicles?|logistics(?:\s+records)?)?\s*(?:for|related to|associated with|owned by|managed by|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+        r'(?i)\b(?:for|related to|associated with|owned by|managed by|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, message)
+        if not match:
+            continue
+
+        value = match.group(1).strip()
+        lowered = value.lower()
+        if not value or value.lower() in {'route', 'shipment', 'shipments', 'delivery', 'deliveries', 'customer', 'data', 'records'}:
+            continue
+        if any(token in lowered for token in [' to ', ' from ', ' and ', 'route', 'source', 'destination', 'location']):
+            continue
+        return value
+
+    return None
+
+
+def _build_generic_search_query(table_name: str, search_term: str) -> tuple[str, list[Any]]:
+    resolved_table_name = _resolve_runtime_table_name(table_name)
+    columns = sorted(ALLOWED_TABLES[table_name])
+    like_value = f'%{search_term.strip()}%'
+    sql = (
+        f"SELECT {', '.join(columns)} FROM {resolved_table_name} WHERE "
+        + ' OR '.join(f'CAST({column} AS TEXT) LIKE ?' for column in columns)
+        + f' ORDER BY {TABLE_DEFAULT_ORDER[table_name]} LIMIT ?'
+    )
+    return sql, [like_value] * len(columns) + [settings.row_limit]
 
 
 def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[Any]]:
@@ -200,6 +234,11 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
                 f"SELECT {columns} FROM {resolved_table_name} WHERE client_name LIKE ? ORDER BY review_date DESC LIMIT ?",
                 ['%Test Client%', settings.row_limit],
             )
+
+        generic_search = _extract_generic_search_term(message)
+        if generic_search:
+            return _build_generic_search_query(table_name, generic_search)
+
         return (
             f"SELECT {columns} FROM {resolved_table_name} ORDER BY review_date DESC LIMIT ?",
             [settings.row_limit],
@@ -216,6 +255,11 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
                 f"SELECT {columns} FROM jobs ORDER BY progress_pct DESC LIMIT ?",
                 [settings.row_limit],
             )
+
+        generic_search = _extract_generic_search_term(message)
+        if generic_search:
+            return _build_generic_search_query(table_name, generic_search)
+
         return (
             f"SELECT {columns} FROM jobs ORDER BY progress_pct DESC LIMIT ?",
             [settings.row_limit],
@@ -231,10 +275,17 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
 
         customer_filter = _extract_customer_filter(message)
         if customer_filter:
+            generic_search = _extract_generic_search_term(message)
+            if generic_search:
+                return _build_generic_search_query(table_name, generic_search)
             return (
                 f"SELECT {columns} FROM shipments WHERE customer = ? ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) DESC LIMIT ?",
                 [customer_filter, settings.row_limit],
             )
+
+        generic_search = _extract_generic_search_term(message)
+        if generic_search:
+            return _build_generic_search_query(table_name, generic_search)
 
         if 'delayed' in lower_message:
             return (
@@ -317,6 +368,9 @@ def detect_table_from_message(message: str) -> str | None:
         ]
     ):
         return 'shipments'
+
+    if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?|logistics(?:\s+records)?)?\s*(?:for|related to|associated with|managed by|owned by|by)\s+[A-Z]', message):
+        return 'logistics_records'
 
     if any(
         term in lower_message

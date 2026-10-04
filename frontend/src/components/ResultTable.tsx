@@ -65,14 +65,35 @@ export function ResultTable({ rows }: { rows: ResultRow[] }) {
   const [sort, setSort] = useState<SortState | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
   const [showCoordinates, setShowCoordinates] = useState(false)
+  const [globalFilter, setGlobalFilter] = useState('')
 
   const allColumns = useMemo(() => Array.from(new Set(rows.flatMap((row) => Object.keys(row)))), [rows])
   const coordinateColumns = allColumns.filter(isCoordinateColumn)
   const columns = showCoordinates ? allColumns : allColumns.filter((column) => !isCoordinateColumn(column))
 
   const sortedRows = useMemo(() => sortRows(rows, sort), [rows, sort])
-  const visibleRows = isExpanded ? sortedRows : sortedRows.slice(0, COLLAPSED_ROW_COUNT)
-  const hasHiddenRows = rows.length > COLLAPSED_ROW_COUNT
+  const filteredRows = useMemo(() => {
+    const globalTerms = globalFilter
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean)
+
+    if (globalTerms.length === 0) {
+      return sortedRows
+    }
+
+    return sortedRows.filter((row) => {
+      const rowText = Object.values(row)
+        .map((value) => String(value ?? '').toLowerCase())
+        .join(' ')
+
+      return globalTerms.every((term) => rowText.includes(term))
+    })
+  }, [globalFilter, sortedRows])
+
+  const visibleRows = isExpanded ? filteredRows : filteredRows.slice(0, COLLAPSED_ROW_COUNT)
+  const hasHiddenRows = filteredRows.length > COLLAPSED_ROW_COUNT
 
   if (rows.length === 0) {
     return null
@@ -80,6 +101,18 @@ export function ResultTable({ rows }: { rows: ResultRow[] }) {
 
   return (
     <div className="ls-table-wrap">
+      <div className="ls-table-search-row">
+        <span className="ls-table-search-icon" aria-hidden="true">⌕</span>
+        <input
+          type="text"
+          className="ls-table-search-input"
+          value={globalFilter}
+          onChange={(event) => setGlobalFilter(event.target.value)}
+          placeholder="Search all columns"
+          aria-label="Search all columns in the result set"
+        />
+      </div>
+
       <div className="ls-table-scroll">
         <table className="ls-table">
           <thead>
@@ -119,10 +152,20 @@ export function ResultTable({ rows }: { rows: ResultRow[] }) {
 
       <div className="ls-table-footer">
         <span className="ls-table-count">
-          Showing {visibleRows.length} of {rows.length} row{rows.length === 1 ? '' : 's'}
+          Showing {visibleRows.length} of {filteredRows.length} row{filteredRows.length === 1 ? '' : 's'}
         </span>
 
         <div className="ls-table-footer-actions">
+          {globalFilter ? (
+            <button
+              type="button"
+              className="ls-btn ls-btn--ghost ls-btn--sm"
+              onClick={() => setGlobalFilter('')}
+            >
+              Clear search
+            </button>
+          ) : null}
+
           {coordinateColumns.length > 0 ? (
             <button type="button" className="ls-btn ls-btn--ghost ls-btn--sm" onClick={() => setShowCoordinates((value) => !value)}>
               {showCoordinates ? 'Hide coordinates' : 'Show coordinates'}
@@ -131,7 +174,7 @@ export function ResultTable({ rows }: { rows: ResultRow[] }) {
 
           {hasHiddenRows ? (
             <button type="button" className="ls-btn ls-btn--ghost ls-btn--sm" onClick={() => setIsExpanded((value) => !value)}>
-              {isExpanded ? 'Show less' : `Show all ${rows.length}`}
+              {isExpanded ? 'Show less' : `Show all ${filteredRows.length}`}
             </button>
           ) : null}
         </div>

@@ -147,6 +147,26 @@ def _frontend_dependencies_need_install() -> bool:
     return lock_stamp.stat().st_mtime < manifest_mtime
 
 
+def _npm_command(*args: str) -> list[str]:
+    """Resolve npm's real path: on Windows it is npm.cmd, which subprocess cannot find by the bare name."""
+    npm = shutil.which('npm')
+    if not npm:
+        raise RuntimeError('npm was not found on PATH. Install Node.js 18+ and open a new terminal.')
+    return [npm, *args]
+
+
+def _terminate_tree(pid: int) -> bool:
+    """Stop a process and its children; on Windows npm leaves the Vite node process behind otherwise."""
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'], capture_output=True, check=False)
+        return True
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def _ensure_local_dependencies() -> None:
     venv_python = _ensure_venv(_find_python_312())
     _log('Installing backend dependencies')
@@ -155,12 +175,41 @@ def _ensure_local_dependencies() -> None:
 
     if _frontend_dependencies_need_install():
         _log('Installing frontend dependencies')
-        subprocess.run(['npm', 'install'], cwd=str(FRONTEND_DIR), check=True)
+        subprocess.run(_npm_command('install'), cwd=str(FRONTEND_DIR), check=True)
 
 
 def _ensure_local_services_not_running() -> None:
+    _discard_stale_pid_file()
     if _has_local_process_running() or _pid_file().exists():
         raise RuntimeError('Local services already appear to be running. Stop them first with: python3 run.py stop')
+
+
+def _discard_stale_pid_file() -> None:
+    """A PID file whose processes are gone (crash, reboot, another machine) must not block startup."""
+    pid_file = _pid_file()
+    if pid_file.exists() and not any(_process_alive(pid) for pid in _recorded_pids(pid_file)):
+        _log('Removing stale PID file from a previous run.')
+        pid_file.unlink(missing_ok=True)
+
+
+def _recorded_pids(pid_file: Path) -> list[int]:
+    try:
+        return [int(pid) for pid in json.loads(pid_file.read_text()).values() if pid]
+    except (ValueError, TypeError, AttributeError):
+        return []
+
+
+def _process_alive(pid: int) -> bool:
+    if os.name == 'nt':
+        result = subprocess.run(['tasklist', '/FI', f'PID eq {pid}', '/NH'], capture_output=True, text=True, check=False)
+        return str(pid) in result.stdout.split()
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _is_port_open(host: str, port: int) -> bool:
@@ -188,7 +237,7 @@ def _wait_for_startup(
 
     for name, process in processes.items():
         if process.poll() is None:
-            process.terminate()
+            _terminate_tree(process.pid)
             try:
                 process.wait(timeout=3)
             except subprocess.TimeoutExpired:
@@ -240,7 +289,7 @@ def _start_local() -> None:
         )
 
         frontend_process = subprocess.Popen(
-            ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', frontend_port],
+            _npm_command('run', 'dev', '--', '--host', '0.0.0.0', '--port', frontend_port),
             cwd=str(FRONTEND_DIR),
             stdin=subprocess.DEVNULL,
             stdout=frontend_log_handle,
@@ -308,13 +357,8 @@ def _stop_local() -> None:
         else:
             for key in ('backend', 'frontend'):
                 pid = pids.get(key)
-                if not pid:
-                    continue
-                try:
-                    os.kill(pid, signal.SIGTERM)
+                if pid and _terminate_tree(pid):
                     stopped = True
-                except ProcessLookupError:
-                    pass
             pid_file.unlink(missing_ok=True)
 
     patterns = [

@@ -62,3 +62,6 @@ coverage/
 # Beat the Copilot live game snapshot
 backend/data/game_snapshot.json
 backend/data/game_snapshot.tmp
+
+# Local launcher state (machine-specific PIDs)
+.logisense-local*.pid

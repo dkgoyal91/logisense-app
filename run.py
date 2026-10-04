@@ -146,7 +146,10 @@ def _ensure_venv(python_executable: str) -> Path:
         shutil.rmtree(ROOT / '.venv', ignore_errors=True)
 
     _log('Creating Python 3.12 virtual environment in .venv')
-    subprocess.run([python_executable, '-m', 'venv', str(ROOT / '.venv')], check=True)
+    if python_executable.lower() == 'py':
+        subprocess.run(['py', '-3.12', '-m', 'venv', str(ROOT / '.venv')], check=True)
+    else:
+        subprocess.run([python_executable, '-m', 'venv', str(ROOT / '.venv')], check=True)
     return _venv_python()
 
 

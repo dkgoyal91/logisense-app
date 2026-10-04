@@ -7,10 +7,26 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Python
+.venv/
+.venv-verify/
+venv/
+pip_version.txt
+pytest_ensure_venv.txt
+pytest_exit.txt
+
+# Node / frontend
 node_modules
 dist
 dist-ssr
 *.local
+/.vite/
+.cache/
+
+# Environment files
+.env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*

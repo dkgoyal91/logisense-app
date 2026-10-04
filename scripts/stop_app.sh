@@ -9,8 +9,10 @@ cd "${ROOT_DIR}"
 if command -v docker >/dev/null 2>&1; then
   if docker compose version >/dev/null 2>&1; then
     echo "Stopping LogiSense Docker services..."
-    docker compose down --remove-orphans --volumes
-    exit 0
+    if docker compose down --remove-orphans --volumes; then
+      exit 0
+    fi
+    echo "Docker Compose stop failed; falling back to local stop logic..."
   fi
 fi
 

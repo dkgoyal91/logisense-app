@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -28,11 +29,32 @@ def _log(message: str) -> None:
     print(f'[logisense] {message}')
 
 
+def _looks_like_windows_python_candidate(candidate: str | None) -> bool:
+    if not candidate:
+        return False
+
+    candidate = candidate.strip()
+    if not candidate:
+        return False
+
+    if candidate.lower() == 'py':
+        return True
+
+    if os.name == 'nt':
+        lower = candidate.replace('\\', '/').lower()
+        if lower.startswith('/opt/') or lower.startswith('/home/') or lower.startswith('/usr/'):
+            return False
+        if '//wsl' in lower or 'wsl' in lower:
+            return False
+
+    return True
+
+
 def _find_python_312() -> str:
     candidates: list[str] = []
 
     env_python = os.environ.get('PYTHON_BIN')
-    if env_python:
+    if env_python and _looks_like_windows_python_candidate(env_python):
         candidates.append(env_python)
 
     candidates.extend(
@@ -58,7 +80,7 @@ def _find_python_312() -> str:
             candidates.append(expanded)
 
     for candidate in candidates:
-        if not candidate:
+        if not candidate or not _looks_like_windows_python_candidate(candidate):
             continue
 
         try:
@@ -114,18 +136,39 @@ def _venv_python_version(venv_python: Path) -> str | None:
     return result.stdout.strip()
 
 
+def _venv_pip_works(venv_python: Path) -> bool:
+    if not venv_python.exists():
+        return False
+    try:
+        subprocess.run(
+            [str(venv_python), '-m', 'pip', '--version'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return False
+    return True
+
+
 def _ensure_venv(python_executable: str) -> Path:
     venv_python = _venv_python()
-    venv_version = _venv_python_version(venv_python)
-    if venv_python.exists() and venv_version == '3.12':
-        return venv_python
-    if venv_python.exists() and venv_version and venv_version != '3.12':
-        _log(f'Recreating .venv because it is using Python {venv_version}, not Python 3.12.')
+    if venv_python.exists():
+        venv_version = _venv_python_version(venv_python)
+        if venv_version == '3.12' and _venv_pip_works(venv_python):
+            return venv_python
+        _log(
+            f'Recreating .venv because it is using Python {venv_version or "an unusable interpreter"}, '
+            f'not Python 3.12 or its pip installation is broken.'
+        )
         shutil.rmtree(ROOT / '.venv', ignore_errors=True)
-    if not venv_python.exists():
-        _log('Creating Python 3.12 virtual environment in .venv')
+
+    _log('Creating Python 3.12 virtual environment in .venv')
+    if python_executable.lower() == 'py':
+        subprocess.run(['py', '-3.12', '-m', 'venv', str(ROOT / '.venv')], check=True)
+    else:
         subprocess.run([python_executable, '-m', 'venv', str(ROOT / '.venv')], check=True)
-    return venv_python
+    return _venv_python()
 
 
 def _frontend_dependencies_need_install() -> bool:
@@ -170,8 +213,10 @@ def _terminate_tree(pid: int) -> bool:
 def _ensure_local_dependencies() -> None:
     venv_python = _ensure_venv(_find_python_312())
     _log('Installing backend dependencies')
-    subprocess.run([str(venv_python), '-m', 'pip', 'install', '--upgrade', 'pip'], check=True)
-    subprocess.run([str(venv_python), '-m', 'pip', 'install', '-r', str(BACKEND_DIR / 'requirements.txt')], check=True)
+    subprocess.run(
+        [str(venv_python), '-m', 'pip', 'install', '--disable-pip-version-check', '-r', str(BACKEND_DIR / 'requirements.txt')],
+        check=True,
+    )
 
     if _frontend_dependencies_need_install():
         _log('Installing frontend dependencies')
@@ -218,6 +263,36 @@ def _is_port_open(host: str, port: int) -> bool:
         return connection.connect_ex((host, port)) == 0
 
 
+def _http_get(url: str, timeout_seconds: float = 1.0) -> tuple[int | None, str]:
+    request = urllib.request.Request(url, headers={'User-Agent': 'LogiSense-health-check'})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            body = response.read().decode('utf-8', errors='replace')
+            return response.status, body
+    except Exception:
+        return None, ''
+
+
+def _is_logisense_backend_ready(host: str = '127.0.0.1', port: int = 8000) -> bool:
+    status, body = _http_get(f'http://{host}:{port}/health', timeout_seconds=1.0)
+    if status != 200:
+        return False
+    try:
+        payload = json.loads(body)
+    except (TypeError, ValueError):
+        return False
+    app_name = str(payload.get('app_name', '')).strip()
+    return 'logisense' in app_name.lower()
+
+
+def _is_logisense_frontend_ready(host: str = '127.0.0.1', port: int = 5173) -> bool:
+    status, body = _http_get(f'http://{host}:{port}/', timeout_seconds=1.0)
+    if status != 200:
+        return False
+    page = body.lower()
+    return 'logisense' in page and ('logistics copilot' in page or 'operations dashboard' in page or '<title>' in page)
+
+
 def _wait_for_startup(
     processes: dict[str, subprocess.Popen[str]],
     ports: dict[str, int],
@@ -229,7 +304,10 @@ def _wait_for_startup(
         failed_service = next((name for name, process in processes.items() if process.poll() is not None), None)
         if failed_service:
             break
-        if all(_is_port_open('127.0.0.1', port) for port in ports.values()):
+
+        backend_ready = _is_logisense_backend_ready('127.0.0.1', ports.get('backend', 8000))
+        frontend_ready = _is_logisense_frontend_ready('127.0.0.1', ports.get('frontend', 5173))
+        if backend_ready and frontend_ready:
             return
         time.sleep(0.2)
 
@@ -251,6 +329,21 @@ def _wait_for_startup(
         raise RuntimeError(
             f'{failed_service.title()} failed to start (exit code {failed_process.returncode}). '
             f'Check {log_file.name} for details.'
+        )
+
+    conflicting_services = []
+    for name, port in ports.items():
+        if _is_port_open('127.0.0.1', port):
+            if name == 'backend' and not _is_logisense_backend_ready('127.0.0.1', port):
+                conflicting_services.append(f'{name} on port {port}')
+            if name == 'frontend' and not _is_logisense_frontend_ready('127.0.0.1', port):
+                conflicting_services.append(f'{name} on port {port}')
+
+    if conflicting_services:
+        raise RuntimeError(
+            'A different app is already listening on the LogiSense ports: '
+            + ', '.join(conflicting_services)
+            + '. Stop the conflicting service or change BACKEND_PORT/FRONTEND_PORT.'
         )
 
     pending_services = ', '.join(name for name, port in ports.items() if not _is_port_open('127.0.0.1', port))

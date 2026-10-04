@@ -9,12 +9,14 @@ cd "${ROOT_DIR}"
 if command -v docker >/dev/null 2>&1; then
   if docker compose version >/dev/null 2>&1; then
     echo "Starting LogiSense using Docker Compose..."
-    docker compose up --build -d
-    exit 0
+    if docker compose up --build -d; then
+      exit 0
+    fi
+    echo "Docker Compose failed; falling back to local Python app..."
   fi
 fi
 
-echo "Docker Compose not available; starting the local Python app..."
+echo "Docker Compose not available or failed; starting the local Python app..."
 if command -v python3.12 >/dev/null 2>&1; then
   python3.12 run.py local
 else

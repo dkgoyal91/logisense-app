@@ -2,7 +2,7 @@ import pytest
 
 from app.chat_agent import process_chat_turn
 from app.database import initialize_database
-from app.sql_service import _validate_sql, execute_safe_query
+from app.sql_service import _validate_sql, execute_safe_query, get_filter_options
 
 
 def test_database_initializes_with_realistic_logistics_rows() -> None:
@@ -43,6 +43,18 @@ def test_shipments_include_route_dates_and_locations() -> None:
     assert all(value is not None for value in sample)
 
 
+def test_shipments_include_realistic_multi_stop_routes_for_delayed_statuses() -> None:
+    initialize_database()
+
+    with __import__('sqlite3').connect(__import__('pathlib').Path(__file__).resolve().parents[1] / 'data' / 'logisense.db') as connection:
+        delayed_routes = connection.execute(
+            "SELECT route FROM shipments WHERE status = 'Delayed' ORDER BY route_start_date ASC LIMIT 10"
+        ).fetchall()
+
+    assert delayed_routes
+    assert any(route[0].count('->') >= 2 for route in delayed_routes)
+
+
 def test_safe_query_handles_generic_source_destination_requests() -> None:
     initialize_database()
     result = execute_safe_query('Show shipments by source location and destination location')
@@ -50,6 +62,17 @@ def test_safe_query_handles_generic_source_destination_requests() -> None:
     assert result['table'] == 'shipments'
     assert result['rows']
     assert all(row['source_location'] and row['destination_location'] for row in result['rows'])
+
+
+def test_shipments_filter_options_do_not_duplicate_destination_field() -> None:
+    initialize_database()
+
+    options = get_filter_options('shipments')
+
+    assert 'source_location' in options
+    assert 'destination_location' in options
+    assert 'origin' not in options
+    assert 'destination' not in options
 
 
 def test_validate_sql_rejects_non_select_statements() -> None:
@@ -97,6 +120,42 @@ def test_generic_search_matches_person_name_across_columns() -> None:
         assert 'LIKE ?' in str(result['sql']).upper()
 
 
+def test_client_and_owner_data_queries_match_named_fields() -> None:
+    initialize_database()
+
+    client_result = execute_safe_query('show me all client data for Crimson Fleet Services')
+    owner_result = execute_safe_query('show me all Logistics Owner data for Oliver Patel')
+
+    assert client_result['table'] == 'logistics_records'
+    assert client_result['rows']
+    assert any(row.get('client_name') == 'Crimson Fleet Services' for row in client_result['rows'])
+
+    assert owner_result['table'] == 'logistics_records'
+    assert owner_result['rows']
+    assert any(row.get('logistics_owner') == 'Oliver Patel' for row in owner_result['rows'])
+
+
+def test_data_requests_for_each_column_default_to_logistics_records() -> None:
+    initialize_database()
+
+    result = execute_safe_query('show data for each column')
+
+    assert result['table'] == 'logistics_records'
+    assert result['rows']
+    assert 'LIKE ?' in str(result['sql']).upper() or 'ORDER BY' in str(result['sql']).upper()
+
+
+def test_record_reference_detail_request_uses_exact_lookup() -> None:
+    initialize_database()
+
+    result = execute_safe_query('show me detail for record ref "SF-24019"')
+
+    assert result['table'] == 'logistics_records'
+    assert result['rows']
+    assert any(row.get('record_ref') == 'SF-24019' for row in result['rows'])
+    assert 'record_ref' in str(result['sql']).lower()
+
+
 def test_shipment_queries_filter_by_related_to_customer_name() -> None:
     initialize_database()
 
@@ -106,6 +165,17 @@ def test_shipment_queries_filter_by_related_to_customer_name() -> None:
     assert result['rows'] == []
     assert result['sql']
     assert 'like ?' in str(result['sql']).lower()
+
+
+def test_shipment_id_detail_requests_use_exact_lookup() -> None:
+    initialize_database()
+
+    result = execute_safe_query('show me shipment id SHP-5252 details')
+
+    assert result['table'] == 'shipments'
+    assert result['rows']
+    assert any(row.get('shipment_id') == 'SHP-5252' for row in result['rows'])
+    assert 'shipment_id = ?' in str(result['sql']).lower()
 
 
 def test_chat_turn_handles_route_creation_requests_as_route_planning() -> None:

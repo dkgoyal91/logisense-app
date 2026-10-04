@@ -136,13 +136,31 @@ def _venv_python_version(venv_python: Path) -> str | None:
     return result.stdout.strip()
 
 
+def _venv_pip_works(venv_python: Path) -> bool:
+    if not venv_python.exists():
+        return False
+    try:
+        subprocess.run(
+            [str(venv_python), '-m', 'pip', '--version'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return False
+    return True
+
+
 def _ensure_venv(python_executable: str) -> Path:
     venv_python = _venv_python()
     if venv_python.exists():
         venv_version = _venv_python_version(venv_python)
-        if venv_version == '3.12':
+        if venv_version == '3.12' and _venv_pip_works(venv_python):
             return venv_python
-        _log(f'Recreating .venv because it is using Python {venv_version or "an unusable interpreter"}, not Python 3.12.')
+        _log(
+            f'Recreating .venv because it is using Python {venv_version or "an unusable interpreter"}, '
+            f'not Python 3.12 or its pip installation is broken.'
+        )
         shutil.rmtree(ROOT / '.venv', ignore_errors=True)
 
     _log('Creating Python 3.12 virtual environment in .venv')
@@ -175,8 +193,10 @@ def _frontend_dependencies_need_install() -> bool:
 def _ensure_local_dependencies() -> None:
     venv_python = _ensure_venv(_find_python_312())
     _log('Installing backend dependencies')
-    subprocess.run([str(venv_python), '-m', 'pip', 'install', '--upgrade', 'pip'], check=True)
-    subprocess.run([str(venv_python), '-m', 'pip', 'install', '-r', str(BACKEND_DIR / 'requirements.txt')], check=True)
+    subprocess.run(
+        [str(venv_python), '-m', 'pip', 'install', '--disable-pip-version-check', '-r', str(BACKEND_DIR / 'requirements.txt')],
+        check=True,
+    )
 
     if _frontend_dependencies_need_install():
         _log('Installing frontend dependencies')

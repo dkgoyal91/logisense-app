@@ -89,6 +89,31 @@ def test_ensure_venv_uses_explicit_py_launcher_version_for_windows(tmp_path, mon
     assert calls and calls[0][:4] == ['py', '-3.12', '-m', 'venv']
 
 
+def test_ensure_venv_rebuilds_broken_pip_installation(tmp_path, monkeypatch) -> None:
+    root = tmp_path
+    venv_dir = root / '.venv'
+    venv_python = venv_dir / 'Scripts' / 'python.exe'
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text('not-a-real-python', encoding='utf-8')
+
+    monkeypatch.setattr(run, 'ROOT', root)
+    monkeypatch.setattr(run, '_venv_python', lambda: venv_python)
+    monkeypatch.setattr(run, '_venv_python_version', lambda _: '3.12')
+    monkeypatch.setattr(run, '_venv_pip_works', lambda _: False)
+
+    calls = []
+
+    def fake_subprocess_run(command, check=True, **kwargs):
+        calls.append(command)
+        return None
+
+    monkeypatch.setattr(run.subprocess, 'run', fake_subprocess_run)
+    monkeypatch.setattr(run.shutil, 'rmtree', lambda *_args, **_kwargs: None)
+
+    assert run._ensure_venv('python') == venv_python
+    assert calls and calls[0][:3] == ['python', '-m', 'venv']
+
+
 def test_database_initializes_with_realistic_logistics_rows() -> None:
     initialize_database()
     result = execute_safe_query('Which logistics records have a review date in 2025?')

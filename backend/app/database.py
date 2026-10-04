@@ -2,12 +2,24 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 from app.config import settings
 
 TABLE_CACHE_FILENAME = 'tables_cache.json'
+
+LEGACY_DATA_MARKERS = (
+    'deutsche bank',
+    'northgate properties',
+    'westfield capital',
+    'crimson estates',
+    'portfolio review',
+    'valuation in progress',
+    'awaiting approval',
+    'sage homes limited',
+)
 
 
 def _resolve_database_path() -> Path:
@@ -29,18 +41,29 @@ def get_connection() -> sqlite3.Connection:
     return connection
 
 
+def _contains_legacy_terms(value: Any) -> bool:
+    if isinstance(value, str):
+        normalized = value.lower()
+        return any(marker in normalized for marker in LEGACY_DATA_MARKERS)
+    if isinstance(value, dict):
+        return any(_contains_legacy_terms(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_legacy_terms(item) for item in value)
+    return False
+
+
 def _generate_logistics_records() -> list[dict[str, Any]]:
     client_names = [
-        'Sage Homes Limited',
-        'Test Client UK UAT1',
-        'Client_Tanveer1',
-        'UAT_TestAcc_0609',
-        'Test - Deutsche Bank AG, Filiale London',
+        'Northstar Freight',
+        'BluePeak Retail Logistics',
+        'HarborSpan Distribution',
+        'Summit Cold Chain',
+        'Apex Route Services',
         'Crestline Logistics',
-        'Northgate Properties',
-        'Westfield Capital',
-        'Crimson Estates',
-        'BluePeak Housing',
+        'MetroLane Warehousing',
+        'TransOrbital Cargo',
+        'Crimson Fleet Services',
+        'BluePeak Housing Logistics',
     ]
     operations_leads = [
         'James Harris',
@@ -62,7 +85,7 @@ def _generate_logistics_records() -> list[dict[str, Any]]:
         'Oliver Patel',
     ]
     regions = ['London', 'Manchester', 'Birmingham', 'Leeds', 'Glasgow', 'Bristol', 'Edinburgh']
-    stages = ['In Progress', 'Due to close', 'Portfolio review', 'Awaiting data', 'On hold']
+    stages = ['In Progress', 'Due this week', 'Capacity review', 'Awaiting manifest', 'On hold']
 
     rows: list[dict[str, Any]] = []
     for index in range(1, 621):
@@ -95,15 +118,15 @@ def _generate_logistics_records() -> list[dict[str, Any]]:
 
 
 def _generate_jobs() -> list[dict[str, Any]]:
-    stages = ['Planning', 'Under review', 'Valuation in progress', 'Awaiting approval', 'Completed']
+    stages = ['Planning', 'Route review', 'Dispatch in progress', 'Awaiting carrier', 'Completed']
     regions = ['London', 'Manchester', 'Birmingham', 'Leeds', 'Glasgow', 'Bristol', 'Edinburgh']
     client_names = [
-        'Sage Homes Limited',
-        'Test Client UK UAT1',
-        'Client_Tanveer1',
-        'UAT_TestAcc_0609',
-        'Northgate Properties',
-        'Westfield Capital',
+        'Northstar Freight',
+        'BluePeak Retail Logistics',
+        'HarborSpan Distribution',
+        'Summit Cold Chain',
+        'MetroLane Warehousing',
+        'TransOrbital Cargo',
     ]
     rows: list[dict[str, Any]] = []
     for index in range(1, 561):
@@ -132,26 +155,56 @@ def _generate_jobs() -> list[dict[str, Any]]:
 
 
 def _generate_shipments() -> list[dict[str, Any]]:
-    customers = ['Sage Homes Limited', 'Crestline Logistics', 'BluePeak Housing', 'Test Client UK UAT1', 'Northgate Properties']
-    routes = ['Southampton -> Birmingham', 'Leeds -> London', 'Manchester -> Bristol', 'Birmingham -> Glasgow', 'London -> Edinburgh', 'Leeds -> Manchester']
+    customers = ['Northstar Freight', 'Crestline Logistics', 'BluePeak Housing Logistics', 'HarborSpan Distribution', 'MetroLane Warehousing']
+    route_pairs = [
+        ('Southampton', 'Birmingham'),
+        ('Leeds', 'London'),
+        ('Manchester', 'Bristol'),
+        ('Birmingham', 'Glasgow'),
+        ('London', 'Edinburgh'),
+        ('Leeds', 'Manchester'),
+    ]
     statuses = ['In transit', 'Delayed', 'Delivered', 'Exception', 'Planned']
     rows: list[dict[str, Any]] = []
     for index in range(1, 661):
         customer = customers[(index - 1) % len(customers)]
-        origin, destination = routes[(index - 1) % len(routes)].split(' -> ')
+        source_location, destination_location = route_pairs[(index - 1) % len(route_pairs)]
+        route = f'{source_location} -> {destination_location}'
         status = statuses[(index - 1) % len(statuses)]
+
+        route_start_year = 2024 + (index % 2)
+        route_start_month = 1 + ((index * 3) % 12)
+        route_start_day = 1 + ((index * 5) % 28)
+        route_start_date = date(route_start_year, route_start_month, route_start_day)
+
         delivery_day = 1 + ((index * 5) % 28)
         delivery_month = 1 + ((index * 2) % 12)
         delivery_year = 2024 + (index % 2)
+        delivery_date = date(delivery_year, delivery_month, delivery_day)
+        planned_offset = 2 + ((index * 3) % 12)
+        planned_delivery_date = delivery_date + timedelta(days=planned_offset)
+
+        if status == 'Delivered':
+            actual_delivery_date = delivery_date
+        elif status == 'Delayed':
+            actual_delivery_date = delivery_date + timedelta(days=1 + (index % 3))
+        else:
+            actual_delivery_date = planned_delivery_date
+
         rows.append(
             {
                 'shipment_id': f'SHP-{5000 + index}',
                 'customer': customer,
-                'route': routes[(index - 1) % len(routes)],
-                'origin': origin,
-                'destination': destination,
+                'route': route,
+                'origin': source_location,
+                'destination': destination_location,
+                'source_location': source_location,
+                'destination_location': destination_location,
                 'status': status,
-                'delivery_date': f'{delivery_year}-{delivery_month:02d}-{delivery_day:02d}',
+                'route_start_date': route_start_date.isoformat(),
+                'planned_delivery_date': planned_delivery_date.isoformat(),
+                'actual_delivery_date': actual_delivery_date.isoformat(),
+                'delivery_date': delivery_date.isoformat(),
                 'weight_kg': 180 + ((index * 37) % 2260),
                 'value_usd': 1500 + ((index * 213) % 85000),
             }
@@ -190,6 +243,12 @@ def _build_table_cache() -> dict[str, list[dict[str, Any]]]:
     }
 
 
+def _write_table_cache(cache_path: Path, cache: dict[str, list[dict[str, Any]]]) -> None:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    with cache_path.open('w', encoding='utf-8') as handle:
+        json.dump(cache, handle, indent=2)
+
+
 def load_table_cache() -> dict[str, list[dict[str, Any]]]:
     """Load all seed table rows from a single JSON cache file, building it once if absent."""
     cache_path = _resolve_table_cache_path()
@@ -198,18 +257,34 @@ def load_table_cache() -> dict[str, list[dict[str, Any]]]:
             cache = json.load(handle)
 
         logistics_rows = cache.get('logistics_records', cache.get('opportunities', []))
-        if logistics_rows and not any('record_ref' in row for row in logistics_rows[:1]):
+        shipments_rows = cache.get('shipments', [])
+        if (
+            logistics_rows
+            and not any('record_ref' in row for row in logistics_rows[:1])
+            or shipments_rows
+            and not any('source_location' in row and 'route_start_date' in row and 'actual_delivery_date' in row for row in shipments_rows[:1])
+        ):
             cache = _build_table_cache()
-            with cache_path.open('w', encoding='utf-8') as handle:
-                json.dump(cache, handle, indent=2)
+            _write_table_cache(cache_path, cache)
+            return cache
+        if _contains_legacy_terms(cache):
+            cache = _build_table_cache()
+            _write_table_cache(cache_path, cache)
             return cache
         return cache
 
     cache = _build_table_cache()
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    with cache_path.open('w', encoding='utf-8') as handle:
-        json.dump(cache, handle, indent=2)
+    _write_table_cache(cache_path, cache)
     return cache
+
+
+def _table_contains_legacy_terms(connection: sqlite3.Connection, table_name: str, text_columns: tuple[str, ...]) -> bool:
+    for column in text_columns:
+        query = f'SELECT {column} FROM {table_name} LIMIT 50'
+        for row in connection.execute(query).fetchall():
+            if _contains_legacy_terms(row[0]):
+                return True
+    return False
 
 
 def _seed_logistics_records(connection: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
@@ -279,7 +354,12 @@ def _seed_shipments(connection: sqlite3.Connection, rows: list[dict[str, Any]]) 
             route,
             origin,
             destination,
+            source_location,
+            destination_location,
             status,
+            route_start_date,
+            planned_delivery_date,
+            actual_delivery_date,
             delivery_date,
             weight_kg,
             value_usd
@@ -289,7 +369,12 @@ def _seed_shipments(connection: sqlite3.Connection, rows: list[dict[str, Any]]) 
             :route,
             :origin,
             :destination,
+            :source_location,
+            :destination_location,
             :status,
+            :route_start_date,
+            :planned_delivery_date,
+            :actual_delivery_date,
             :delivery_date,
             :weight_kg,
             :value_usd
@@ -485,7 +570,12 @@ def initialize_database() -> None:
                 route TEXT NOT NULL,
                 origin TEXT NOT NULL,
                 destination TEXT NOT NULL,
+                source_location TEXT,
+                destination_location TEXT,
                 status TEXT NOT NULL,
+                route_start_date TEXT,
+                planned_delivery_date TEXT,
+                actual_delivery_date TEXT,
                 delivery_date TEXT NOT NULL,
                 weight_kg INTEGER NOT NULL,
                 value_usd INTEGER NOT NULL
@@ -516,7 +606,35 @@ def initialize_database() -> None:
             for table in minimum_targets
         }
 
-        needs_reseed = any(current_counts[table] < target for table, target in minimum_targets.items())
+        shipment_columns = {row[1] for row in connection.execute('PRAGMA table_info(shipments)').fetchall()}
+        missing_shipment_columns = {
+            'source_location',
+            'destination_location',
+            'route_start_date',
+            'planned_delivery_date',
+            'actual_delivery_date',
+        } - shipment_columns
+        for column_name in sorted(missing_shipment_columns):
+            connection.execute(f'ALTER TABLE shipments ADD COLUMN {column_name} TEXT')
+
+        shipment_metadata_missing = connection.execute(
+            "SELECT 1 FROM shipments WHERE source_location IS NULL OR destination_location IS NULL OR route_start_date IS NULL OR planned_delivery_date IS NULL OR actual_delivery_date IS NULL LIMIT 1"
+        ).fetchone() is not None
+
+        legacy_content_present = any(
+            [
+                _table_contains_legacy_terms(connection, 'logistics_records', ('client_name', 'status')),
+                _table_contains_legacy_terms(connection, 'jobs', ('client_name', 'status', 'current_stage')),
+                _table_contains_legacy_terms(connection, 'shipments', ('customer', 'status')),
+            ]
+        )
+
+        needs_reseed = (
+            legacy_content_present
+            or shipment_metadata_missing
+            or bool(missing_shipment_columns)
+            or any(current_counts[table] < target for table, target in minimum_targets.items())
+        )
         if needs_reseed:
             connection.execute('DELETE FROM logistics_records')
             connection.execute('DELETE FROM jobs')

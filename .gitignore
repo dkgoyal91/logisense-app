@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
@@ -20,6 +21,7 @@ htmlcov/
 
 # FastAPI / app runtime
 *.log
+.logisense-*.log
 .logisense-local*.pid
 logs/
 *.sqlite3

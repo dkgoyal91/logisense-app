@@ -98,8 +98,13 @@ const quickStartActions: PromptAction[] = [
   },
   {
     label: 'Prioritize delayed shipments',
-    prompt: 'Show delayed shipments by delivery date',
-    description: 'Sort late deliveries into a clear operational queue for recovery planning.',
+    prompt: 'Show delayed shipments by actual delivery date',
+    description: 'Sort late deliveries by route timing and recovery urgency for action planning.',
+  },
+  {
+    label: 'Track route start and destination flow',
+    prompt: 'Show shipments with source location, route start date, and destination location',
+    description: 'Review the end-to-end movement window from origin to final destination and service completion.',
   },
   {
     label: 'Escalate ageing work orders',
@@ -109,8 +114,10 @@ const quickStartActions: PromptAction[] = [
 ]
 
 const suggestedPrompts: PromptAction[] = [
+  { label: 'Add route from Manchester to Leeds', prompt: 'Create route from Manchester to Leeds for the next dispatch cycle' },
   { label: 'Show delayed shipments for Birmingham routes', prompt: 'Show delayed shipments for Birmingham routes' },
   { label: 'Which logistics routes have the highest delivery risk?', prompt: 'Which logistics routes have the highest delivery risk?' },
+  { label: 'Show shipments by source location and destination location', prompt: 'Show shipments by source location and destination location' },
   { label: 'List fleet vehicles in maintenance status', prompt: 'List fleet vehicles in maintenance status' },
   { label: 'Show open work orders with highest days open', prompt: 'Show open work orders with highest days open' },
 ]
@@ -349,6 +356,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState('ops-session-1')
   const [draft, setDraft] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isDashboardLoading, setIsDashboardLoading] = useState(false)
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null)
   const [selectedTabId, setSelectedTabId] = useState<string>(tabs[0].id)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -413,13 +421,18 @@ function App() {
   ]
 
   const fetchDashboard = async () => {
-    const response = await fetch(`${apiBaseUrl}/api/dashboard`)
-    if (!response.ok) {
-      throw new Error('Dashboard fetch failed')
-    }
+    setIsDashboardLoading(true)
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/dashboard`)
+      if (!response.ok) {
+        throw new Error('Dashboard fetch failed')
+      }
 
-    const data = (await response.json()) as DashboardResponse
-    setDashboard(data)
+      const data = (await response.json()) as DashboardResponse
+      setDashboard(data)
+    } finally {
+      setIsDashboardLoading(false)
+    }
   }
 
   const fetchLiveRowsForTab = async (tab: ModuleTab) => {
@@ -719,6 +732,15 @@ function App() {
 
       {activeView === 'dashboard' ? (
         <main className="chat-stage dashboard-stage">
+          {isDashboardLoading ? (
+            <div className={`app-loading-panel ${dashboard === null ? '' : 'app-loading-panel--compact'}`} aria-live="polite" aria-busy="true">
+              <span className={`loading-spinner ${dashboard === null ? 'loading-spinner--lg' : 'loading-spinner--sm'}`} aria-hidden="true" />
+              <div>
+                <strong>{dashboard === null ? 'Loading live backend data' : 'Refreshing backend data'}</strong>
+                <p>{dashboard === null ? 'Fetching dashboard KPIs, records, and operational signals.' : 'Updating dashboard KPIs and live records.'}</p>
+              </div>
+            </div>
+          ) : null}
           <Dashboard apiBaseUrl={apiBaseUrl} kpis={dashboard?.kpis ?? null} />
         </main>
       ) : (
@@ -906,8 +928,8 @@ function App() {
                   {isLoading && (
                     <div className="chat-bubble-row assistant">
                       <div className="chat-bubble thinking">
-                        <span className="thinking-indicator" />
-                        LogiSense logistics AI is thinking...
+                        <span className="loading-spinner loading-spinner--sm" aria-hidden="true" />
+                        <span>LogiSense logistics AI is thinking...</span>
                       </div>
                     </div>
                   )}

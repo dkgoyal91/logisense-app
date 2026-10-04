@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover - graceful path when dependencies are no
     StateGraph = None
 
 from app.config import settings
-from app.sql_service import detect_table_from_message, execute_safe_query
+from app.sql_service import _extract_route_direction, detect_table_from_message, execute_safe_query
 
 conversation_store: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
 # Remembers the last table each session queried, so follow-up questions ("show more of those")
@@ -32,7 +32,10 @@ PROMPT_INJECTION_PATTERN = re.compile(
 )
 
 WRITE_INTENT_PATTERN = re.compile(
-    r'(?i)\b(update|delete|insert|drop|alter|truncate|grant|revoke|create|replace)\b'
+    r'(?i)\b(update|delete|insert|drop|alter|truncate|grant|revoke|replace)\b'
+)
+ROUTE_PLANNING_PATTERN = re.compile(
+    r'(?i)\b(?:add|create|new|plan|schedule)\s+(?:a\s+)?route\b|\broute\s+(?:from|to|between|planning)\b'
 )
 
 GUARDRAIL_REFUSAL = (
@@ -63,6 +66,13 @@ def _is_blocked_user_message(text: str) -> bool:
     normalized_text = text.strip()
     if not normalized_text:
         return False
+
+    if ROUTE_PLANNING_PATTERN.search(normalized_text):
+        return bool(
+            PROMPT_INJECTION_PATTERN.search(normalized_text)
+            or re.search(r'(?i)\b(?:drop|delete|update|insert|alter|truncate|grant|revoke|replace)\b', normalized_text)
+        )
+
     return bool(PROMPT_INJECTION_PATTERN.search(normalized_text) or WRITE_INTENT_PATTERN.search(normalized_text))
 
 
@@ -126,6 +136,11 @@ def sql_agent(state: dict[str, Any]) -> dict[str, Any]:
     if table is None:
         state['grounded_answer'] = state['summary']
         return state
+
+    if table == 'shipments' and not rows:
+        origin, destination = _extract_route_direction(user_message)
+        if origin and destination:
+            state['summary'] = f'No shipments are available for the route from {origin} to {destination} in the current logistics dataset.'
 
     preview = rows[:3]
     state['grounded_answer'] = _sanitize_logistics_text(

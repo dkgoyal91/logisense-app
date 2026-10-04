@@ -20,6 +20,7 @@ htmlcov/
 
 # FastAPI / app runtime
 *.log
+.logisense-local*.pid
 logs/
 *.sqlite3
 *.db

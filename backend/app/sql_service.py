@@ -67,6 +67,12 @@ FILTERABLE_COLUMNS: dict[str, list[str]] = {
 
 MAX_PAGE_SIZE = 200
 
+READ_ONLY_SQL_PATTERN = re.compile(r'^\s*SELECT\b', re.IGNORECASE)
+FORBIDDEN_SQL_PATTERN = re.compile(
+    r'(?i)\b(drop|delete|update|insert|alter|truncate|grant|revoke|create|attach|detach|replace|execute|pragma|vacuum)\b'
+)
+TABLE_REFERENCE_PATTERN = re.compile(r'\b(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)', re.IGNORECASE)
+
 # Approximate UK city centroids used to plot map markers for location-bearing rows.
 CITY_COORDINATES: dict[str, tuple[float, float]] = {
     'london': (51.5072, -0.1276),
@@ -227,17 +233,27 @@ def detect_table_from_message(message: str) -> str | None:
 
 
 def _validate_sql(sql: str) -> None:
-    if not sql or ';' in sql:
+    normalized_sql = (sql or '').strip()
+
+    if not normalized_sql or ';' in normalized_sql:
         raise ValueError('Only a single read-only statement is allowed.')
-    forbidden = re.compile(r'(?i)\b(drop|delete|update|insert|alter|truncate|grant|revoke|create|attach|detach|replace|execute)\b')
-    if forbidden.search(sql):
+
+    if not READ_ONLY_SQL_PATTERN.match(normalized_sql):
+        raise ValueError('Only SELECT statements are allowed.')
+
+    if '--' in normalized_sql or '/*' in normalized_sql or '*/' in normalized_sql:
+        raise ValueError('SQL comments are not allowed.')
+
+    if FORBIDDEN_SQL_PATTERN.search(normalized_sql):
         raise ValueError('Unsafe SQL detected.')
-    match = re.search(r'\bFROM\s+([A-Za-z_]+)', sql, flags=re.IGNORECASE)
-    if not match:
+
+    table_names = {match.group(1).lower() for match in TABLE_REFERENCE_PATTERN.finditer(normalized_sql)}
+    if not table_names:
         raise ValueError('Missing table reference in query.')
-    table_name = match.group(1).lower()
-    if table_name not in ALLOWED_TABLES:
-        raise ValueError(f'Table {table_name} is not allowed.')
+
+    disallowed_tables = sorted(table_name for table_name in table_names if table_name not in ALLOWED_TABLES)
+    if disallowed_tables:
+        raise ValueError(f'Table {disallowed_tables[0]} is not allowed.')
 
 
 def execute_safe_query(message: str, table_hint: str | None = None) -> dict[str, Any]:

@@ -1,8 +1,68 @@
 import pytest
 
+import run
 from app.chat_agent import process_chat_turn
 from app.database import initialize_database
 from app.sql_service import _validate_sql, execute_safe_query, get_filter_options
+
+
+def test_windows_wsl_python_paths_are_rejected() -> None:
+    assert run._looks_like_windows_python_candidate('/opt/homebrew/opt/python@3.12/bin/python.exe') is False
+    assert run._looks_like_windows_python_candidate('C:/Python312/python.exe') is True
+    assert run._looks_like_windows_python_candidate('py') is True
+
+
+def test_local_service_validation_rejects_unrelated_apps(monkeypatch) -> None:
+    class FakeResponse:
+        def __init__(self, payload: str, status: int = 200):
+            self.payload = payload
+            self.status = status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return self.payload.encode('utf-8')
+
+    def fake_urlopen(request, timeout=1.0):
+        url = request.full_url
+        if url.endswith('/health'):
+            raise RuntimeError('backend not ready')
+        if 'localhost:5173' in url:
+            return FakeResponse('<html><head><title>ASIP</title></head></html>')
+        return FakeResponse('{"app_name": "LogiSense Logistics Copilot"}')
+
+    monkeypatch.setattr(run.urllib.request, 'urlopen', fake_urlopen)
+
+    assert run._is_logisense_backend_ready('127.0.0.1', 8000) is False
+    assert run._is_logisense_frontend_ready('127.0.0.1', 5173) is False
+
+
+def test_ensure_venv_rebuilds_invalid_virtualenv(tmp_path, monkeypatch) -> None:
+    root = tmp_path
+    venv_dir = root / '.venv'
+    venv_python = venv_dir / 'Scripts' / 'python.exe'
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text('not-a-real-python', encoding='utf-8')
+
+    monkeypatch.setattr(run, 'ROOT', root)
+    monkeypatch.setattr(run, '_venv_python', lambda: venv_python)
+    monkeypatch.setattr(run, '_venv_python_version', lambda _: None)
+
+    calls = []
+
+    def fake_subprocess_run(command, check=True, **kwargs):
+        calls.append(command)
+        return None
+
+    monkeypatch.setattr(run.subprocess, 'run', fake_subprocess_run)
+    monkeypatch.setattr(run.shutil, 'rmtree', lambda *_args, **_kwargs: None)
+
+    assert run._ensure_venv('python') == venv_python
+    assert calls and calls[0][:3] == ['python', '-m', 'venv']
 
 
 def test_database_initializes_with_realistic_logistics_rows() -> None:

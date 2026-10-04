@@ -22,6 +22,8 @@ services:
       - ./frontend:/app
     ports:
       - "5173:5173"
+    environment:
+      - BACKEND_URL=http://backend:8000
     command: sh -lc "npm install && npm run dev -- --host 0.0.0.0"
     depends_on:
       - backend

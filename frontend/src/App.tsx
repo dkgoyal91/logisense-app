@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import { ResultChart, ResultMap } from './components/ResultVisuals'
 import { describeChart } from './utils/chartPlan'
@@ -369,6 +369,12 @@ function App() {
   const isWelcomeState = activeMessages.length === 1 && activeMessages[0]?.role === 'assistant'
   const visibleMessages = isWelcomeState ? [] : activeMessages
   const lastAssistantWithRows = [...activeMessages].reverse().find((message) => message.role === 'assistant' && (message.data?.rows?.length ?? 0) > 0)
+  const lastResultTableIndex = visibleMessages.reduce((lastIndex, message, index) => {
+    if (message.role === 'assistant' && (message.data?.rows?.length ?? 0) > 0) {
+      return index
+    }
+    return lastIndex
+  }, -1)
   const contextualPrompts = buildContextualPrompts(lastAssistantWithRows?.data?.rows ?? [], lastAssistantWithRows?.data?.table)
   const topbarTitle = activeView === 'dashboard' ? 'LogiSense Operations Dashboard' : 'LogiSense Logistics Copilot'
   const topbarSubtitle = activeView === 'dashboard'
@@ -466,6 +472,14 @@ function App() {
       fetchDashboard().catch((error) => console.error('Auto-refresh dashboard failed', error))
     },
   })
+
+  const resultTableRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (lastResultTableIndex >= 0 && resultTableRef.current) {
+      resultTableRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [lastResultTableIndex, visibleMessages.length])
 
   const handleSend = async (prompt?: string) => {
     const nextPrompt = (prompt ?? draft).trim()
@@ -848,7 +862,10 @@ function App() {
                           ) : null}
                           <p>{message.text}</p>
                           {hasRows ? (
-                            <div className="chat-result-table">
+                            <div
+                              ref={lastResultTableIndex === index ? resultTableRef : undefined}
+                              className="chat-result-table"
+                            >
                               <div className="chat-result-head">
                                 <span>Result set</span>
                                 <span>{headlineText}</span>

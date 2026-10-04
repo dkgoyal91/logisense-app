@@ -66,7 +66,7 @@ TABLE_DEFAULT_ORDER: dict[str, str] = {
 FILTERABLE_COLUMNS: dict[str, list[str]] = {
     'logistics_records': ['status', 'region'],
     'jobs': ['status', 'region', 'current_stage'],
-    'shipments': ['status', 'source_location', 'destination_location', 'origin', 'destination'],
+    'shipments': ['status', 'source_location', 'destination_location'],
     'vehicles': ['status', 'depot'],
 }
 
@@ -130,6 +130,32 @@ def _extract_name(message: str) -> str | None:
     return name if name else None
 
 
+def _extract_record_ref(message: str) -> str | None:
+    match = re.search(r'(?i)\b(?:record\s+ref|record\s+reference|ref)\b\s*["\']?([A-Za-z0-9-]+)["\']?', message)
+    if not match:
+        return None
+    ref = match.group(1).strip()
+    return ref if ref else None
+
+
+def _extract_shipment_id(message: str) -> str | None:
+    patterns = [
+        r'(?i)\bshipment\s+id\s*[:=]?\s*([A-Z]+-\d+)\b',
+        r'(?i)\bshipment\s+([A-Z]+-\d+)\b',
+        r'(?i)\b(?:shipment|delivery)\s+(?:details?|info|record|data)\s+(?:for|of|on)\s*([A-Z]+-\d+)\b',
+        r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:detail|details)\s+(?:for|of|on)\s+(?:shipment|delivery)\s+([A-Z]+-\d+)\b',
+        r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:shipment|delivery)\s+([A-Z]+-\d+)\b',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, message)
+        if match:
+            shipment_id = match.group(1).strip()
+            if shipment_id:
+                return shipment_id
+    return None
+
+
 def _resolve_runtime_table_name(table_name: str) -> str:
     return table_name
 
@@ -153,8 +179,8 @@ def _extract_route_direction(message: str) -> tuple[str | None, str | None]:
 
 def _extract_customer_filter(message: str) -> str | None:
     patterns = [
-        r'(?i)\b(?:for|customer|customer is|customer name)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
-        r'(?i)\bshow\s+(?:all\s+)?(?:shipments|delivery|loads)?\s*(?:for|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+        r'(?i)\b(?:for|customer|customer is|customer name|related to|associated with)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+        r'(?i)\b(?:show|list|display|find|get)\s+(?:all\s+)?(?:shipments?|deliveries?|loads?)?\s*(?:related to|associated with|for|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
     ]
     for pattern in patterns:
         match = re.search(pattern, message)
@@ -169,6 +195,56 @@ def _extract_customer_filter(message: str) -> str | None:
     return None
 
 
+def _extract_generic_search_term(message: str) -> str | None:
+    patterns = [
+        r'(?i)\b(?:show\s+(?:me\s+)?|list\s+|display\s+|find\s+|get\s+|search\s+)\s*(?:all\s+)?(?:data|records?|shipments?|jobs?|vehicles?|logistics(?:\s+records)?)?\s*(?:for|related to|associated with|owned by|managed by|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+        r'(?i)\b(?:for|related to|associated with|owned by|managed by|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, message)
+        if not match:
+            continue
+
+        value = match.group(1).strip()
+        lowered = value.lower()
+        if not value or value.lower() in {'route', 'shipment', 'shipments', 'delivery', 'deliveries', 'customer', 'data', 'records'}:
+            continue
+        if any(token in lowered for token in [' to ', ' from ', ' and ', 'route', 'source', 'destination', 'location']):
+            continue
+        return value
+
+    return None
+
+
+def _extract_field_search(message: str) -> tuple[str, str] | None:
+    field_patterns = [
+        (r'(?i)\b(?:show\s+(?:me\s+)?|list\s+|display\s+|find\s+|get\s+|search\s+)\s*(?:all\s+)?(?:client|customer)\s*(?:data)?\s*(?:for|related to|associated with|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)', 'client_name'),
+        (r'(?i)\b(?:show\s+(?:me\s+)?|list\s+|display\s+|find\s+|get\s+|search\s+)\s*(?:all\s+)?(?:logistics\s+owner|owner)\s*(?:data)?\s*(?:for|related to|associated with|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)', 'logistics_owner'),
+        (r'(?i)\b(?:show\s+(?:me\s+)?|list\s+|display\s+|find\s+|get\s+|search\s+)\s*(?:all\s+)?(?:operations\s+lead|lead)\s*(?:data)?\s*(?:for|related to|associated with|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)', 'operations_lead'),
+    ]
+
+    for pattern, field_name in field_patterns:
+        match = re.search(pattern, message)
+        if match:
+            value = match.group(1).strip()
+            if value:
+                return field_name, value
+    return None
+
+
+def _build_generic_search_query(table_name: str, search_term: str) -> tuple[str, list[Any]]:
+    resolved_table_name = _resolve_runtime_table_name(table_name)
+    columns = sorted(ALLOWED_TABLES[table_name])
+    like_value = f'%{search_term.strip()}%'
+    sql = (
+        f"SELECT {', '.join(columns)} FROM {resolved_table_name} WHERE "
+        + ' OR '.join(f'CAST({column} AS TEXT) LIKE ?' for column in columns)
+        + f' ORDER BY {TABLE_DEFAULT_ORDER[table_name]} LIMIT ?'
+    )
+    return sql, [like_value] * len(columns) + [settings.row_limit]
+
+
 def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[Any]]:
     resolved_table_name = _resolve_runtime_table_name(table_name)
     columns = ', '.join(sorted(ALLOWED_TABLES[table_name]))
@@ -176,6 +252,27 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
     params: list[Any] = []
 
     if table_name == 'logistics_records':
+        record_ref = _extract_record_ref(message)
+        if record_ref:
+            return (
+                f"SELECT {columns} FROM {resolved_table_name} WHERE record_ref = ? ORDER BY review_date DESC LIMIT ?",
+                [record_ref, settings.row_limit],
+            )
+
+        if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?)\s+(?:for\s+)?(?:each|all)\s+columns?\b', message):
+            return (
+                f"SELECT {columns} FROM {resolved_table_name} ORDER BY review_date DESC LIMIT ?",
+                [settings.row_limit],
+            )
+
+        field_search = _extract_field_search(message)
+        if field_search:
+            field_name, field_value = field_search
+            return (
+                f"SELECT {columns} FROM {resolved_table_name} WHERE {field_name} LIKE ? ORDER BY review_date DESC LIMIT ?",
+                [f'%{field_value}%', settings.row_limit],
+            )
+
         if 'managed by' in lower_message or 'operations lead' in lower_message or 'job director' in lower_message:
             name = _extract_name(message)
             if name:
@@ -200,6 +297,17 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
                 f"SELECT {columns} FROM {resolved_table_name} WHERE client_name LIKE ? ORDER BY review_date DESC LIMIT ?",
                 ['%Test Client%', settings.row_limit],
             )
+
+        if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?)\s+(?:for\s+)?(?:each|all)\s+columns?\b', message):
+            return (
+                f"SELECT {columns} FROM {resolved_table_name} ORDER BY review_date DESC LIMIT ?",
+                [settings.row_limit],
+            )
+
+        generic_search = _extract_generic_search_term(message)
+        if generic_search:
+            return _build_generic_search_query(table_name, generic_search)
+
         return (
             f"SELECT {columns} FROM {resolved_table_name} ORDER BY review_date DESC LIMIT ?",
             [settings.row_limit],
@@ -216,12 +324,24 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
                 f"SELECT {columns} FROM jobs ORDER BY progress_pct DESC LIMIT ?",
                 [settings.row_limit],
             )
+
+        generic_search = _extract_generic_search_term(message)
+        if generic_search:
+            return _build_generic_search_query(table_name, generic_search)
+
         return (
             f"SELECT {columns} FROM jobs ORDER BY progress_pct DESC LIMIT ?",
             [settings.row_limit],
         )
 
     if table_name == 'shipments':
+        shipment_id = _extract_shipment_id(message)
+        if shipment_id:
+            return (
+                f"SELECT {columns} FROM shipments WHERE shipment_id = ? ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) DESC LIMIT ?",
+                [shipment_id.upper(), settings.row_limit],
+            )
+
         origin, destination = _extract_route_direction(message)
         if origin and destination:
             return (
@@ -231,10 +351,17 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
 
         customer_filter = _extract_customer_filter(message)
         if customer_filter:
+            generic_search = _extract_generic_search_term(message)
+            if generic_search:
+                return _build_generic_search_query(table_name, generic_search)
             return (
                 f"SELECT {columns} FROM shipments WHERE customer = ? ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) DESC LIMIT ?",
                 [customer_filter, settings.row_limit],
             )
+
+        generic_search = _extract_generic_search_term(message)
+        if generic_search:
+            return _build_generic_search_query(table_name, generic_search)
 
         if 'delayed' in lower_message:
             return (
@@ -317,6 +444,15 @@ def detect_table_from_message(message: str) -> str | None:
         ]
     ):
         return 'shipments'
+
+    if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?|client|logistics\s+owner|owner|operations\s+lead|lead|logistics(?:\s+records)?)?\s*(?:for|related to|associated with|managed by|owned by|by)\s+[A-Z]', message):
+        return 'logistics_records'
+
+    if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:detail|details)?\s*(?:for\s+)?(?:record\s+ref|record\s+reference|ref)\b', message):
+        return 'logistics_records'
+
+    if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?)\s+(?:for\s+)?(?:each|all)\s+columns?\b', message):
+        return 'logistics_records'
 
     if any(
         term in lower_message

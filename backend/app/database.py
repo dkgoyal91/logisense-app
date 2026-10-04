@@ -164,13 +164,40 @@ def _generate_shipments() -> list[dict[str, Any]]:
         ('London', 'Edinburgh'),
         ('Leeds', 'Manchester'),
     ]
+    route_stop_options = {
+        'Southampton': ['Bristol', 'Leeds', 'Birmingham'],
+        'Leeds': ['Bradford', 'Manchester', 'Birmingham'],
+        'Manchester': ['Bradford', 'Leeds', 'Bristol'],
+        'Birmingham': ['Leeds', 'Wolverhampton', 'Glasgow'],
+        'London': ['Birmingham', 'Leeds', 'Peterborough'],
+        'Glasgow': ['Edinburgh', 'Manchester', 'Leeds'],
+        'Bristol': ['Southampton', 'Birmingham', 'Leeds'],
+        'Edinburgh': ['Glasgow', 'Manchester', 'Leeds'],
+    }
     statuses = ['In transit', 'Delayed', 'Delivered', 'Exception', 'Planned']
     rows: list[dict[str, Any]] = []
     for index in range(1, 661):
         customer = customers[(index - 1) % len(customers)]
         source_location, destination_location = route_pairs[(index - 1) % len(route_pairs)]
-        route = f'{source_location} -> {destination_location}'
-        status = statuses[(index - 1) % len(statuses)]
+        status_cycle = (index % 10)
+        if status_cycle in {0, 1, 2}:
+            status = 'Delayed'
+        elif status_cycle in {3, 4}:
+            status = 'Exception'
+        elif status_cycle == 5:
+            status = 'Planned'
+        elif status_cycle in {6, 7}:
+            status = 'In transit'
+        else:
+            status = 'Delivered'
+
+        route_waypoints = [
+            city
+            for city in route_stop_options.get(source_location, [destination_location])
+            if city not in {source_location, destination_location}
+        ]
+        route_path = [source_location, *route_waypoints[:2], destination_location]
+        route = ' -> '.join(route_path)
 
         route_start_year = 2024 + (index % 2)
         route_start_month = 1 + ((index * 3) % 12)
@@ -187,7 +214,9 @@ def _generate_shipments() -> list[dict[str, Any]]:
         if status == 'Delivered':
             actual_delivery_date = delivery_date
         elif status == 'Delayed':
-            actual_delivery_date = delivery_date + timedelta(days=1 + (index % 3))
+            actual_delivery_date = planned_delivery_date + timedelta(days=1 + (index % 4))
+        elif status == 'Exception':
+            actual_delivery_date = planned_delivery_date + timedelta(days=3 + (index % 5))
         else:
             actual_delivery_date = planned_delivery_date
 

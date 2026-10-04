@@ -9,7 +9,11 @@ lerna-debug.log*
 
 # Python
 .venv/
+.venv-verify/
 venv/
+pip_version.txt
+pytest_ensure_venv.txt
+pytest_exit.txt
 
 # Node / frontend
 node_modules

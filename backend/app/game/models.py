@@ -51,6 +51,8 @@ class Player:
     last_attack_at: float | None = None
     race_finished_at: float | None = None
     kicked: bool = False
+    takeaway_status: str | None = None   # queued | sent | failed | saved (collected, mail not configured)
+    takeaway_hint: str | None = None     # masked address only; the full address lives in the takeaway CSV
 
     @property
     def total(self) -> int:

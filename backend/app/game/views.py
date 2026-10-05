@@ -58,7 +58,8 @@ def show_view(ctx: ViewContext) -> View:
 
 
 def host_view(ctx: ViewContext) -> View:
-    return {**show_view(ctx), 'players': _roster(ctx.state), 'answer_key': _answer_key(ctx)}
+    return {**show_view(ctx), 'players': _roster(ctx.state), 'answer_key': _answer_key(ctx),
+            'takeaway_counts': _takeaway_counts(ctx.state)}
 
 
 def player_view(ctx: ViewContext, player_id: str | None) -> View:
@@ -212,7 +213,18 @@ def _me(ctx: ViewContext, player: Player) -> View:
         'rank': ctx.ranks.get(player.id),
         'race_done': player.race_finished_at is not None,
         'kicked': player.kicked,
+        'takeaway': _takeaway(player),
     }
+
+
+def _takeaway(player: Player) -> View | None:
+    if player.takeaway_status is None:
+        return None
+    return {'status': player.takeaway_status, 'email_hint': player.takeaway_hint}
+
+
+def _takeaway_counts(state: GameState) -> dict[str, int]:
+    return dict(Counter(p.takeaway_status for p in state.players.values() if p.takeaway_status))
 
 
 def _my_answer(state: GameState, player: Player) -> int | None:

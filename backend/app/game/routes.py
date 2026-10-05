@@ -15,6 +15,8 @@ from app.game.persistence import SnapshotStore
 from app.game.questions import build_questions, load_shipment_counts
 from app.game.reveal import run_copilot
 from app.game.service import GameService
+from app.game.takeaway import TakeawayDispatcher, TakeawayLog
+from app.game.takeaway_mail import MailSettings, SmtpSender
 
 POLICY_VIOLATION = 1008
 
@@ -45,6 +47,29 @@ def create_service() -> GameService:
         run_copilot=run_copilot,
         host_pin=pin,
         join_url=_join_url(),
+        takeaway=_create_takeaway(),
+    )
+
+
+def _create_takeaway() -> TakeawayDispatcher:
+    mail = _mail_settings()
+    log_path = resolve_backend_path(settings.takeaway_log_path)
+    if mail.is_configured:
+        print(f'[game] Takeaway email: sending via {mail.host} as {mail.from_address}', flush=True)
+    else:
+        print(f'[game] Takeaway email: SMTP not configured, collecting addresses in {log_path}', flush=True)
+    return TakeawayDispatcher(mail, TakeawayLog(log_path), SmtpSender(mail) if mail.is_configured else None)
+
+
+def _mail_settings() -> MailSettings:
+    return MailSettings(
+        host=settings.smtp_host,
+        port=settings.smtp_port,
+        username=settings.smtp_username,
+        password=settings.smtp_password,
+        from_address=settings.mail_from or settings.smtp_username,
+        from_name=settings.mail_from_name,
+        repo_url=settings.takeaway_repo_url,
     )
 
 

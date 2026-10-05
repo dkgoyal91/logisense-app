@@ -57,9 +57,25 @@ export type ShowView = {
 }
 
 export type RosterEntry = { id: string; name: string; total: number; kicked: boolean; race_done: boolean; demo_awarded: boolean }
-export type HostView = ShowView & { players: RosterEntry[]; answer_key: string | null }
+export type HostView = ShowView & {
+  players: RosterEntry[]
+  answer_key: string | null
+  takeaway_counts: Partial<Record<TakeawayStatus, number>>
+}
 
-export type Me = { id: string; name: string; token: string; total: number; rank: number | null; race_done: boolean; kicked: boolean }
+export type TakeawayStatus = 'queued' | 'sent' | 'failed' | 'saved'
+export type Takeaway = { status: TakeawayStatus; email_hint: string | null }
+
+export type Me = {
+  id: string
+  name: string
+  token: string
+  total: number
+  rank: number | null
+  race_done: boolean
+  kicked: boolean
+  takeaway: Takeaway | null
+}
 export type MyResult = { answered: boolean; correct: boolean; points: number; correct_option: string }
 export type Award = { category: AwardCategory; place: number }
 
@@ -102,6 +118,7 @@ export type ClientMessage =
   | { type: 'race_done' }
   | { type: 'bonus_question'; text: string }
   | { type: 'bonus_vote'; question_id: string }
+  | { type: 'takeaway'; email: string; consent: boolean }
   | ({ type: 'host'; action: HostAction } & HostExtras)
 
 export type ServerMessage = { type: 'state'; view: unknown } | { type: 'error'; message: string }

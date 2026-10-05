@@ -309,3 +309,23 @@ def _lookup_bonus_question(state: GameState, question_id: str) -> BonusQuestion:
     if question is None:
         raise GameError('Unknown question.')
     return question
+
+
+# Takeaway email --------------------------------------------------------------------------
+
+TAKEAWAY_IN_PROGRESS_OR_DONE = ('queued', 'sent', 'saved')
+
+
+def request_takeaway(state: GameState, player_id: str | None, email_hint: str) -> Player:
+    player = _require_player(state, player_id)
+    if player.takeaway_status in TAKEAWAY_IN_PROGRESS_OR_DONE:
+        raise GameError('Your email is already on its way.')
+    player.takeaway_status = 'queued'
+    player.takeaway_hint = email_hint
+    return player
+
+
+def record_takeaway_result(state: GameState, player_id: str, status: str) -> None:
+    player = state.players.get(player_id)
+    if player is not None:
+        player.takeaway_status = status

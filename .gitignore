@@ -82,6 +82,7 @@ coverage.xml
 # Beat the Copilot live game snapshot
 backend/data/game_snapshot.json
 backend/data/game_snapshot.tmp
+backend/data/takeaway_emails.csv
 
 # Local launcher state (machine-specific PIDs)
 .logisense-local*.pid

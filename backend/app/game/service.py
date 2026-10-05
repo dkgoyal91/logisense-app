@@ -13,6 +13,8 @@ from app.game.host_pin import HostPinGuard
 from app.game.hub import Audience, Connection, Hub
 from app.game.models import GameError, GameState, Question
 from app.game.persistence import SnapshotStore
+from app.game.takeaway import TakeawayDispatcher
+from app.game.takeaway_mail import mask_email, normalize_email
 
 RESET_CONFIRMATION = 'RESET'
 BROADCAST_INTERVAL_SECONDS = 0.3
@@ -38,6 +40,7 @@ class GameService:
         clock: Callable[[], float] = time.time,
         new_id: Callable[[], str] = _new_id,
         broadcast_interval: float = BROADCAST_INTERVAL_SECONDS,
+        takeaway: TakeawayDispatcher | None = None,
     ) -> None:
         self.hub = Hub()
         self.state = store.load() or GameState()
@@ -51,6 +54,8 @@ class GameService:
         self._lock = asyncio.Lock()
         self._broadcast_interval = broadcast_interval
         self._audience_publish: asyncio.Task[None] | None = None
+        self._takeaway = takeaway
+        self._deliveries: set[asyncio.Task[None]] = set()
 
     # Connections ---------------------------------------------------------------------------
 
@@ -65,6 +70,9 @@ class GameService:
         self.hub.remove(connection)
 
     async def handle_player(self, connection: Connection, message: Message) -> None:
+        if message.get('type') == 'takeaway':
+            await self._handle_takeaway(connection, message)
+            return
         if await self._apply(connection, lambda: self._dispatch_player(connection, message), _only(connection)):
             self._schedule_audience_publish()
 
@@ -114,6 +122,37 @@ class GameService:
         if connection.role == 'host':
             return views.host_view(ctx)
         return views.player_view(ctx, connection.player_id)
+
+    # Takeaway email ------------------------------------------------------------------------
+
+    async def _handle_takeaway(self, connection: Connection, message: Message) -> None:
+        request: dict[str, str] = {}
+        queued = await self._apply(connection, lambda: request.update(self._queue_takeaway(connection, message)),
+                                   _only(connection))
+        if queued:
+            self._schedule_audience_publish()
+            self._start_delivery(connection, request)
+
+    def _queue_takeaway(self, connection: Connection, message: Message) -> dict[str, str]:
+        if self._takeaway is None:
+            raise GameError('Email takeaway is not available right now.')
+        if message.get('consent') is not True:
+            raise GameError('Please tick the consent box first.')
+        email = normalize_email(message.get('email', ''))
+        player = engine.request_takeaway(self.state, connection.player_id, mask_email(email))
+        return {'player_id': player.id, 'name': player.name, 'email': email}
+
+    def _start_delivery(self, connection: Connection, request: dict[str, str]) -> None:
+        task = asyncio.create_task(self._deliver_takeaway(connection, request))
+        self._deliveries.add(task)
+        task.add_done_callback(self._deliveries.discard)
+
+    async def _deliver_takeaway(self, connection: Connection, request: dict[str, str]) -> None:
+        status = await self._takeaway.deliver(request['name'], request['email'])
+        player_id = request['player_id']
+        await self._apply(connection, lambda: engine.record_takeaway_result(self.state, player_id, status),
+                          _only(connection))
+        self._schedule_audience_publish()
 
     # Player messages -----------------------------------------------------------------------
 

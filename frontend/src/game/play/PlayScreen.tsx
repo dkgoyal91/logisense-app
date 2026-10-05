@@ -11,6 +11,7 @@ import { JoinForm } from './JoinForm.tsx'
 import { PlayerHeader } from './PlayerHeader.tsx'
 import { RaceButton } from './RaceButton.tsx'
 import { ResultCard } from './ResultCard.tsx'
+import { TakeawayCard } from './TakeawayCard.tsx'
 import { WaitingCard } from './WaitingCard.tsx'
 
 const rejoinSavedPlayer = (send: Send): void => {
@@ -56,7 +57,15 @@ type BodyProps = { view: PlayerView; me: Me; socket: GameSocket<PlayerView> }
 
 function PhaseBody({ view, me, socket }: BodyProps) {
   const { send, receivedAt } = socket
+  const takeaway = <TakeawayCard takeaway={me.takeaway} onSend={(email) => send({ type: 'takeaway', email, consent: true })} />
   switch (view.phase) {
+    case 'lobby':
+      return (
+        <>
+          <WaitingCard message={waitingMessage(view, me)} />
+          {takeaway}
+        </>
+      )
     case 'question_open':
       return view.question && (
         <AnswerPad question={view.question} myAnswer={view.my_answer} receivedAt={receivedAt} onAnswer={(option) => send({ type: 'answer', option })} />
@@ -74,7 +83,12 @@ function PhaseBody({ view, me, socket }: BodyProps) {
         />
       )
     case 'finale':
-      return <FinalCard me={me} awards={view.awards} />
+      return (
+        <>
+          <FinalCard me={me} awards={view.awards} />
+          {takeaway}
+        </>
+      )
     default:
       return <WaitingCard message={waitingMessage(view, me)} />
   }

@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     game_public_url: str = ''
     game_snapshot_path: str = 'data/game_snapshot.json'
     frontend_dist_path: str = '../frontend/dist'
+    smtp_host: str = 'smtp.gmail.com'
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    mail_from: str | None = None
+    mail_from_name: str = 'LogiSense @ Flo 2026'
+    takeaway_repo_url: str = 'https://github.com/dkgoyal91/logisense-app'
+    takeaway_log_path: str = 'data/takeaway_emails.csv'
 
     @property
     def is_groq_configured(self) -> bool:

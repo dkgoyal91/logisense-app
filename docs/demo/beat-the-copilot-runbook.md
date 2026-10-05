@@ -28,6 +28,20 @@
 | Bonus (optional) | **Bonus round**; **Ask on screen** on the top question; or **Skip bonus → finale** |
 | Finale | **Finale** — the leaderboard counts up and confetti fires |
 
+## Takeaway email (Gmail)
+Players can ask for the repo link + build prompt by email from their phone (lobby and finale screens).
+1. On the Gmail account that will send: turn on 2-Step Verification, then create an App Password
+   (Google Account → Security → App passwords). Copy the 16-character password.
+2. Add to `backend/.env` (never commit it): `SMTP_USERNAME`, `SMTP_PASSWORD` (the app password) and `MAIL_FROM`
+   — see `backend/.env.example`.
+3. Restart the backend. The console prints `[game] Takeaway email: sending via smtp.gmail.com as …`.
+   Without these settings it prints `SMTP not configured, collecting addresses` and the phone says
+   "We'll email you after the session".
+4. Send yourself one from `/play` to check it lands (and isn't in spam).
+5. The host remote shows `📩 Emails: N sent · M failed`. Every request is logged in
+   `backend/data/takeaway_emails.csv` (git-ignored) — resend any `failed`/`pending` rows after the session,
+   then **delete the CSV**: consent was "deleted after the event".
+
 ## If something goes wrong
 - **Phones cannot connect** (tunnel down): tap **✋ Hands mode**. Keep driving `/show` and `/host` on localhost; ask for a show of hands, reveal, award prizes by applause.
 - **Server restarts**: start it again with the same command; the game resumes from `backend/data/game_snapshot.json` and phones reconnect automatically.

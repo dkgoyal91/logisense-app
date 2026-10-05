@@ -16,7 +16,7 @@ from game_support import QUESTIONS, fake_copilot, joined_state
 
 PIN = 'broadcast-pin-1234'
 SETTINGS = MailSettings(host='smtp.gmail.com', port=587, username=None, password=None,
-                        from_address='flocompanion2026@gmail.com', from_name='LogiSense @ Flo 2026',
+                        from_address='flo.demo@gmail.com', from_name='LogiSense @ Flo 2026',
                         repo_url='https://github.com/dkgoyal91/logisense-app')
 
 
@@ -44,7 +44,7 @@ def _log_with(tmp_path: Path, *emails: str) -> TakeawayLog:
 
 def test_bcc_message_goes_to_the_sender_with_everyone_in_bcc() -> None:
     message = build_bcc_message(['a@x.com', 'b@y.com'], SETTINGS)
-    assert message['To'] == 'flocompanion2026@gmail.com'
+    assert message['To'] == 'flo.demo@gmail.com'
     assert message['Bcc'] == 'a@x.com, b@y.com'
     assert 'Hi there,' in message.get_body(('plain',)).get_content()
 

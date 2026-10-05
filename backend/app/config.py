@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     mail_from_name: str = 'LogiSense @ Flo 2026'
     takeaway_repo_url: str = 'https://github.com/dkgoyal91/logisense-app'
     takeaway_log_path: str = 'data/takeaway_emails.csv'
+    gmail_token_path: str = 'data/gmail_token.json'
 
     @property
     def is_groq_configured(self) -> bool:

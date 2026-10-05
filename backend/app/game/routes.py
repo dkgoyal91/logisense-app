@@ -16,6 +16,7 @@ from app.game.questions import build_questions, load_shipment_counts
 from app.game.reveal import run_copilot
 from app.game.service import GameService
 from app.game.takeaway import TakeawayDispatcher, TakeawayLog
+from app.game.gmail_api import GmailApiSender, GmailToken
 from app.game.takeaway_mail import MailSettings, SmtpSender
 
 POLICY_VIOLATION = 1008
@@ -52,22 +53,27 @@ def create_service() -> GameService:
 
 
 def _create_takeaway() -> TakeawayDispatcher:
+    """Prefer the Gmail API (HTTPS, works behind corporate SMTP blocks), then SMTP, else only collect."""
+    log = TakeawayLog(resolve_backend_path(settings.takeaway_log_path))
+    gmail_token = GmailToken.load(resolve_backend_path(settings.gmail_token_path))
+    if gmail_token is not None:
+        print(f'[game] Takeaway email: sending via the Gmail API as {gmail_token.sender}', flush=True)
+        return TakeawayDispatcher(_mail_settings(from_address=gmail_token.sender), log, GmailApiSender(gmail_token))
     mail = _mail_settings()
-    log_path = resolve_backend_path(settings.takeaway_log_path)
     if mail.is_configured:
         print(f'[game] Takeaway email: sending via {mail.host} as {mail.from_address}', flush=True)
-    else:
-        print(f'[game] Takeaway email: SMTP not configured, collecting addresses in {log_path}', flush=True)
-    return TakeawayDispatcher(mail, TakeawayLog(log_path), SmtpSender(mail) if mail.is_configured else None)
+        return TakeawayDispatcher(mail, log, SmtpSender(mail))
+    print(f'[game] Takeaway email: no sender configured, collecting addresses in {log.path}', flush=True)
+    return TakeawayDispatcher(mail, log, None)
 
 
-def _mail_settings() -> MailSettings:
+def _mail_settings(from_address: str | None = None) -> MailSettings:
     return MailSettings(
         host=settings.smtp_host,
         port=settings.smtp_port,
         username=settings.smtp_username,
         password=settings.smtp_password,
-        from_address=settings.mail_from or settings.smtp_username,
+        from_address=from_address or settings.mail_from or settings.smtp_username,
         from_name=settings.mail_from_name,
         repo_url=settings.takeaway_repo_url,
     )

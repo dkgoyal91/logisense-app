@@ -23,6 +23,10 @@ class TakeawayLog:
     def __init__(self, path: Path) -> None:
         self._path = path
 
+    @property
+    def path(self) -> Path:
+        return self._path
+
     def record(self, name: str, email: str, status: str, detail: str = '') -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         is_new = not self._path.exists()
@@ -57,7 +61,7 @@ class TakeawayDispatcher:
 
     @property
     def can_send(self) -> bool:
-        return self._sender is not None and self._settings.is_configured
+        return self._sender is not None and bool(self._settings.from_address)
 
     async def deliver(self, name: str, email: str) -> str:
         if not self.can_send:

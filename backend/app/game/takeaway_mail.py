@@ -85,9 +85,28 @@ def plain_body(player_name: str, settings: MailSettings) -> str:
         f'Repo: {settings.repo_url}\n'
         f'Clone it: {settings.clone_command}\n'
         f'Build-your-own prompt (paste into any AI coding agent): {settings.prompt_url}\n\n'
-        'It runs with no API key. Python 3.12 and Node 18+ are the only prerequisites.\n\n'
+        f'{_plain_prerequisites()}\n'
         f'See you around,\n{SPEAKERS}\n'
     )
+
+
+PREREQUISITES = (
+    'Python 3.10 or newer. Windows: install it from python.org and tick "Add python.exe to PATH".',
+    'Node.js 20.19 or newer (Node 22 LTS recommended), from nodejs.org.',
+    'Any AI coding agent: Claude Code, Cursor, Copilot, Windsurf or Gemini CLI.',
+    'No API key needed. A Groq key is optional.',
+)
+VERSION_CHECK = 'Check first: macOS "python3 --version", Windows "py --version", and "node --version" on both.'
+
+
+def _plain_prerequisites() -> str:
+    lines = '\n'.join(f'  - {item}' for item in PREREQUISITES)
+    return f'Before you start:\n{lines}\n{VERSION_CHECK}\n'
+
+
+def _html_prerequisites() -> str:
+    items = ''.join(f'<li>{escape(item)}</li>' for item in PREREQUISITES)
+    return f'<p><b>Before you start:</b></p><ul>{items}</ul><p>{escape(VERSION_CHECK)}</p>'
 
 
 def _html_body(player_name: str, settings: MailSettings) -> str:
@@ -100,7 +119,7 @@ def _html_body(player_name: str, settings: MailSettings) -> str:
         f'<p><b>Repo:</b> <a href="{repo}">{repo}</a></p>'
         f'<p><b>Clone it:</b><br><code style="background:#f1f5f9;padding:4px 8px;border-radius:6px">{clone}</code></p>'
         f'<p><b>Build-your-own prompt</b> (paste into any AI coding agent): <a href="{prompt}">{prompt}</a></p>'
-        '<p>It runs with no API key. Python 3.12 and Node 18+ are the only prerequisites.</p>'
+        f'{_html_prerequisites()}'
         f'<p>See you around,<br>{escape(SPEAKERS)}</p></div>'
     )
 

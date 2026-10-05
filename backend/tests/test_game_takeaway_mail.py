@@ -89,3 +89,15 @@ def test_smtp_sender_uses_starttls_and_logs_in_before_sending(monkeypatch) -> No
         ('connect', 'smtp.gmail.com', 587), ('starttls',), ('login', 'flo.demo@gmail.com', 'app-password'),
         ('send', 'ananya@nagarro.com'), ('quit',),
     ]
+
+
+def test_takeaway_message_lists_the_prerequisites_for_mac_and_windows() -> None:
+    message = build_takeaway_message('ananya@nagarro.com', 'Ananya', SETTINGS)
+    for body in (message.get_body(('plain',)).get_content(), message.get_body(('html',)).get_content()):
+        assert 'Python 3.10 or newer' in body
+        assert 'Add python.exe to PATH' in body
+        assert 'Node.js 20.19 or newer' in body
+        assert 'Node 22 LTS' in body
+        assert 'No API key needed' in body
+        assert 'py --version' in body and 'python3 --version' in body and 'node --version' in body
+        assert 'Node 18+' not in body

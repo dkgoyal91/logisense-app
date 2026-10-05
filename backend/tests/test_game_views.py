@@ -52,9 +52,16 @@ def test_host_view_adds_roster_and_answer_key() -> None:
     state, _ids = joined_state('Ada')
     engine.advance(state, 2, now=0)
     host = views.host_view(_ctx(state))
-    assert host['answer_key'] == 'C'
     assert host['players'][0]['name'] == 'Ada'
     assert host['join_url'] == JOIN_URL
+    engine.reveal(state, QUESTIONS, fake_copilot)
+    assert views.host_view(_ctx(state))['answer_key'] == 'C'
+
+
+def test_host_answer_key_stays_hidden_until_reveal() -> None:
+    state, _ids = joined_state('Ada')
+    engine.advance(state, 2, now=0)
+    assert views.host_view(_ctx(state))['answer_key'] is None
 
 
 def test_attack_feed_is_newest_first_and_hides_kicked_players() -> None:

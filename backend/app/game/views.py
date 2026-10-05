@@ -151,8 +151,11 @@ def _distribution(answers: dict[str, Answer]) -> list[int]:
 
 
 def _answer_key(ctx: ViewContext) -> str | None:
+    """The host only learns the answer at reveal, so it can never leak while people are voting."""
     question = _current_question(ctx)
-    return None if question is None else question.options[question.correct_index]
+    if question is None or ctx.state.phase is not Phase.QUESTION_REVEALED:
+        return None
+    return question.options[question.correct_index]
 
 
 # Race, attacks, bonus --------------------------------------------------------------------

@@ -53,8 +53,11 @@ def create_service() -> GameService:
 
 
 def _create_takeaway() -> TakeawayDispatcher:
-    """Prefer the Gmail API (HTTPS, works behind corporate SMTP blocks), then SMTP, else only collect."""
+    """Collect by default; with TAKEAWAY_DELIVERY=instant prefer the Gmail API, then SMTP."""
     log = TakeawayLog(resolve_backend_path(settings.takeaway_log_path))
+    if settings.takeaway_delivery != 'instant':
+        print(f'[game] Takeaway email: collecting addresses for one post-session email ({log.path})', flush=True)
+        return TakeawayDispatcher(_mail_settings(), log, None)
     gmail_token = GmailToken.load(resolve_backend_path(settings.gmail_token_path))
     if gmail_token is not None:
         print(f'[game] Takeaway email: sending via the Gmail API as {gmail_token.sender}', flush=True)

@@ -146,7 +146,19 @@ def test_game_prefers_the_gmail_api_when_a_token_exists(tmp_path: Path, monkeypa
     TOKEN.save(token_path)
     monkeypatch.setattr(routes.settings, 'gmail_token_path', str(token_path))
     monkeypatch.setattr(routes.settings, 'takeaway_log_path', str(tmp_path / 'log.csv'))
+    monkeypatch.setattr(routes.settings, 'takeaway_delivery', 'instant')
     dispatcher = routes._create_takeaway()
     assert dispatcher.can_send is True
     assert type(dispatcher._sender).__name__ == 'GmailApiSender'
     assert dispatcher._settings.from_address == 'flo.demo@gmail.com'
+
+
+def test_game_only_collects_unless_instant_delivery_is_switched_on(tmp_path: Path, monkeypatch) -> None:
+    from app.game import routes
+
+    token_path = tmp_path / 'gmail_token.json'
+    TOKEN.save(token_path)
+    monkeypatch.setattr(routes.settings, 'gmail_token_path', str(token_path))
+    monkeypatch.setattr(routes.settings, 'takeaway_log_path', str(tmp_path / 'log.csv'))
+    monkeypatch.setattr(routes.settings, 'takeaway_delivery', 'after')
+    assert routes._create_takeaway().can_send is False

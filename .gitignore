@@ -84,6 +84,7 @@ backend/data/game_snapshot.json
 backend/data/game_snapshot.tmp
 backend/data/takeaway_emails.csv
 backend/data/gmail_token.json
+backend/data/takeaway_batch.txt
 
 # Local launcher state (machine-specific PIDs)
 .logisense-local*.pid

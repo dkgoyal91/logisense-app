@@ -64,12 +64,12 @@ def build_takeaway_message(to_address: str, player_name: str, settings: MailSett
     message['Subject'] = SUBJECT
     message['From'] = formataddr((settings.from_name, settings.from_address or ''))
     message['To'] = to_address
-    message.set_content(_plain_body(player_name, settings))
+    message.set_content(plain_body(player_name, settings))
     message.add_alternative(_html_body(player_name, settings), subtype='html')
     return message
 
 
-def _plain_body(player_name: str, settings: MailSettings) -> str:
+def plain_body(player_name: str, settings: MailSettings) -> str:
     return (
         f'Hi {player_name},\n\n'
         'Thanks for playing Beat the Copilot at Flo 2026! Here is everything you need to build your own '

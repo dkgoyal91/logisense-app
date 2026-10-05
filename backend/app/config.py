@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     takeaway_repo_url: str = 'https://github.com/dkgoyal91/logisense-app'
     takeaway_log_path: str = 'data/takeaway_emails.csv'
     gmail_token_path: str = 'data/gmail_token.json'
+    takeaway_delivery: str = 'after'   # 'after' = collect, one BCC email post-session; 'instant' = send on request
 
     @property
     def is_groq_configured(self) -> bool:

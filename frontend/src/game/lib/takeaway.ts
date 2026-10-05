@@ -1,4 +1,4 @@
-import type { Takeaway, TakeawayStatus } from '../types.ts'
+import type { Takeaway, TakeawayBroadcast, TakeawayStatus } from '../types.ts'
 
 const LOOKS_LIKE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -20,4 +20,17 @@ const COUNT_LABELS: [TakeawayStatus, string][] = [['sent', 'sent'], ['failed', '
 export const takeawayCountsLabel = (counts: Partial<Record<TakeawayStatus, number>>): string => {
   const parts = COUNT_LABELS.filter(([status]) => counts[status]).map(([status, label]) => `${counts[status]} ${label}`)
   return `📩 Emails: ${parts.length ? parts.join(' · ') : 'none yet'}`
+}
+
+const people = (count: number): string => `${count} ${count === 1 ? 'person' : 'people'}`
+
+export const broadcastBannerText = (broadcast: TakeawayBroadcast): string => {
+  if (broadcast.status === 'sending') return `📩 Sending the repo to ${people(broadcast.count)}…`
+  if (broadcast.status === 'sent') return `✓ Sent the repo to ${people(broadcast.count)}! Check your inbox.`
+  return "The email didn't go out. We'll send it after the session."
+}
+
+export const sendButtonLabel = (waiting: number, broadcast: TakeawayBroadcast | null): string => {
+  if (broadcast?.status === 'sending') return '📩 Sending…'
+  return waiting > 0 ? `📩 Send email to everyone (${waiting} waiting)` : '📩 Send email (nobody waiting yet)'
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canSendTakeaway, takeawayCountsLabel, takeawayStatusText } from './takeaway.ts'
+import { broadcastBannerText, canSendTakeaway, sendButtonLabel, takeawayCountsLabel, takeawayStatusText } from './takeaway.ts'
 
 describe('takeawayStatusText', () => {
   it('describes each delivery state with the masked address', () => {
@@ -22,5 +22,22 @@ describe('takeawayCountsLabel', () => {
   it('summarises delivery counts for the host', () => {
     expect(takeawayCountsLabel({ sent: 3, failed: 1, saved: 2 })).toBe('📩 Emails: 3 sent · 1 failed · 2 collected')
     expect(takeawayCountsLabel({})).toBe('📩 Emails: none yet')
+  })
+})
+
+describe('broadcastBannerText', () => {
+  it('announces each stage of the room-wide email', () => {
+    expect(broadcastBannerText({ status: 'sending', count: 42, detail: '' })).toBe('📩 Sending the repo to 42 people…')
+    expect(broadcastBannerText({ status: 'sent', count: 42, detail: '' })).toBe('✓ Sent the repo to 42 people! Check your inbox.')
+    expect(broadcastBannerText({ status: 'sent', count: 1, detail: '' })).toBe('✓ Sent the repo to 1 person! Check your inbox.')
+    expect(broadcastBannerText({ status: 'failed', count: 42, detail: 'x' })).toBe("The email didn't go out. We'll send it after the session.")
+  })
+})
+
+describe('sendButtonLabel', () => {
+  it('shows who is waiting and locks while sending', () => {
+    expect(sendButtonLabel(5, null)).toBe('📩 Send email to everyone (5 waiting)')
+    expect(sendButtonLabel(0, null)).toBe('📩 Send email (nobody waiting yet)')
+    expect(sendButtonLabel(5, { status: 'sending', count: 5, detail: '' })).toBe('📩 Sending…')
   })
 })

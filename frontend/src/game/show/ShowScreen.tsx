@@ -8,6 +8,7 @@ import { QuestionStage } from './QuestionStage.tsx'
 import { RaceClock } from './RaceClock.tsx'
 import { RacePodium } from './RacePodium.tsx'
 import { RevealPanel } from './RevealPanel.tsx'
+import { TakeawayBanner } from './TakeawayBanner.tsx'
 
 export function ShowScreen() {
   const { view, receivedAt, connected } = useGameSocket<ShowView>('show')
@@ -15,6 +16,7 @@ export function ShowScreen() {
   return (
     <div className="show">
       {!connected && <div className="offline-banner">Reconnecting…</div>}
+      <TakeawayBanner broadcast={view.takeaway_broadcast} />
       <ShowStage view={view} receivedAt={receivedAt} />
       {view.race.started && view.phase !== 'finale' && <RaceClock race={view.race} receivedAt={receivedAt} />}
     </div>

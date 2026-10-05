@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useGameSocket } from '../hooks/useGameSocket.ts'
 import { ConfirmButton } from '../shared/ConfirmButton.tsx'
 import { ErrorToast } from '../shared/ErrorToast.tsx'
-import { takeawayCountsLabel } from '../lib/takeaway.ts'
+import { sendButtonLabel, takeawayCountsLabel } from '../lib/takeaway.ts'
 import type { HostView } from '../types.ts'
 import { HostControls, type Act } from './HostControls.tsx'
 import { HostAttacks, HostBonus, HostPlayers } from './HostLists.tsx'
@@ -26,7 +26,22 @@ export function HostScreen() {
       <HostAttacks view={view} act={act} />
       <HostBonus view={view} act={act} />
       <HostPlayers view={view} act={act} />
+      <SendEmailButton view={view} act={act} />
       <ConfirmButton onConfirm={() => act('reset', { confirm: 'RESET' })}>Reset game</ConfirmButton>
     </div>
+  )
+}
+
+function SendEmailButton({ view, act }: { view: HostView; act: Act }) {
+  const waiting = (view.takeaway_counts.saved ?? 0) + (view.takeaway_counts.failed ?? 0)
+  const sending = view.takeaway_broadcast?.status === 'sending'
+  const failure = view.takeaway_broadcast?.status === 'failed' ? view.takeaway_broadcast.detail : null
+  return (
+    <>
+      <ConfirmButton className="primary big" disabled={waiting === 0 || sending} onConfirm={() => act('send_takeaway', { confirm: 'SEND' })}>
+        {sendButtonLabel(waiting, view.takeaway_broadcast)}
+      </ConfirmButton>
+      {failure && <p className="takeaway-error">Email failed: {failure}</p>}
+    </>
   )
 }

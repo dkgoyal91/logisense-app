@@ -98,3 +98,4 @@ class GameState:
     bonus_answer: dict[str, Any] | None = None
     players: dict[str, Player] = field(default_factory=dict)
     hands_mode: bool = False
+    takeaway_broadcast: dict[str, Any] | None = None   # {'status': sending|sent|failed, 'count', 'detail'}

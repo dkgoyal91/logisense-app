@@ -329,3 +329,23 @@ def record_takeaway_result(state: GameState, player_id: str, status: str) -> Non
     player = state.players.get(player_id)
     if player is not None:
         player.takeaway_status = status
+
+
+def start_takeaway_broadcast(state: GameState, recipient_count: int) -> None:
+    if (state.takeaway_broadcast or {}).get('status') == 'sending':
+        raise GameError('The email is already sending.')
+    if recipient_count == 0:
+        raise GameError('Nobody has asked for the email yet.')
+    state.takeaway_broadcast = {'status': 'sending', 'count': recipient_count, 'detail': ''}
+
+
+def finish_takeaway_broadcast(state: GameState, status: str, recipient_count: int, detail: str = '') -> None:
+    state.takeaway_broadcast = {'status': status, 'count': recipient_count, 'detail': detail}
+    if status == 'sent':
+        _mark_waiting_players_sent(state)
+
+
+def _mark_waiting_players_sent(state: GameState) -> None:
+    for player in state.players.values():
+        if player.takeaway_status in ('saved', 'failed', 'queued'):
+            player.takeaway_status = 'sent'

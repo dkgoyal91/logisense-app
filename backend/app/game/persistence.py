@@ -53,6 +53,7 @@ def state_from_dict(data: dict[str, Any]) -> GameState:
         bonus_answer=data['bonus_answer'],
         players={player_id: Player(**player) for player_id, player in data['players'].items()},
         hands_mode=data['hands_mode'],
+        takeaway_broadcast=data.get('takeaway_broadcast'),
     )
 
 

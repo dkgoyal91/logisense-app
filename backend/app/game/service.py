@@ -14,9 +14,11 @@ from app.game.hub import Audience, Connection, Hub
 from app.game.models import GameError, GameState, Question
 from app.game.persistence import SnapshotStore
 from app.game.takeaway import TakeawayDispatcher
+from app.game.takeaway_batch import TakeawayBroadcaster
 from app.game.takeaway_mail import mask_email, normalize_email
 
 RESET_CONFIRMATION = 'RESET'
+SEND_CONFIRMATION = 'SEND'
 BROADCAST_INTERVAL_SECONDS = 0.3
 MALFORMED_MESSAGE = 'Malformed message.'
 
@@ -41,6 +43,7 @@ class GameService:
         new_id: Callable[[], str] = _new_id,
         broadcast_interval: float = BROADCAST_INTERVAL_SECONDS,
         takeaway: TakeawayDispatcher | None = None,
+        broadcaster: TakeawayBroadcaster | None = None,
     ) -> None:
         self.hub = Hub()
         self.state = store.load() or GameState()
@@ -55,6 +58,7 @@ class GameService:
         self._broadcast_interval = broadcast_interval
         self._audience_publish: asyncio.Task[None] | None = None
         self._takeaway = takeaway
+        self._broadcaster = broadcaster
         self._deliveries: set[asyncio.Task[None]] = set()
 
     # Connections ---------------------------------------------------------------------------
@@ -77,6 +81,9 @@ class GameService:
             self._schedule_audience_publish()
 
     async def handle_host(self, connection: Connection, message: Message) -> None:
+        if message.get('action') == 'send_takeaway':
+            await self._handle_takeaway_broadcast(connection, message)
+            return
         await self._apply(connection, lambda: self._dispatch_host(message), _everyone)
 
     # Apply + publish -----------------------------------------------------------------------
@@ -153,6 +160,24 @@ class GameService:
         await self._apply(connection, lambda: engine.record_takeaway_result(self.state, player_id, status),
                           _only(connection))
         self._schedule_audience_publish()
+
+    async def _handle_takeaway_broadcast(self, connection: Connection, message: Message) -> None:
+        recipients: list[str] = []
+        started = await self._apply(connection, lambda: recipients.extend(self._start_broadcast(message)), _everyone)
+        if not started:
+            return
+        status, detail = await self._broadcaster.send(recipients)
+        count = len(recipients)
+        await self._apply(connection, lambda: engine.finish_takeaway_broadcast(self.state, status, count, detail), _everyone)
+
+    def _start_broadcast(self, message: Message) -> list[str]:
+        if message.get('confirm') != SEND_CONFIRMATION:
+            raise GameError('Tap the button twice to confirm sending.')
+        if self._broadcaster is None or not self._broadcaster.can_send:
+            raise GameError('No email sender is set up. Run the Gmail authorization first.')
+        recipients = self._broadcaster.pending()
+        engine.start_takeaway_broadcast(self.state, len(recipients))
+        return recipients
 
     # Player messages -----------------------------------------------------------------------
 

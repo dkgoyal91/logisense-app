@@ -15,7 +15,8 @@ from app.game.persistence import SnapshotStore
 from app.game.questions import build_questions, load_shipment_counts
 from app.game.reveal import run_copilot
 from app.game.service import GameService
-from app.game.takeaway import TakeawayDispatcher, TakeawayLog
+from app.game.takeaway import Sender, TakeawayDispatcher, TakeawayLog
+from app.game.takeaway_batch import TakeawayBroadcaster
 from app.game.gmail_api import GmailApiSender, GmailToken
 from app.game.takeaway_mail import MailSettings, SmtpSender
 
@@ -49,25 +50,43 @@ def create_service() -> GameService:
         host_pin=pin,
         join_url=_join_url(),
         takeaway=_create_takeaway(),
+        broadcaster=_create_broadcaster(),
     )
 
 
 def _create_takeaway() -> TakeawayDispatcher:
-    """Collect by default; with TAKEAWAY_DELIVERY=instant prefer the Gmail API, then SMTP."""
-    log = TakeawayLog(resolve_backend_path(settings.takeaway_log_path))
-    if settings.takeaway_delivery != 'instant':
-        print(f'[game] Takeaway email: collecting addresses for one post-session email ({log.path})', flush=True)
-        return TakeawayDispatcher(_mail_settings(), log, None)
+    """Collect by default (one email from the host button); with TAKEAWAY_DELIVERY=instant send on request."""
+    log = _takeaway_log()
+    mail, sender, via = _resolve_sender()
+    if settings.takeaway_delivery == 'instant' and sender is not None:
+        print(f'[game] Takeaway email: sending instantly via {via}', flush=True)
+        return TakeawayDispatcher(mail, log, sender)
+    print(f'[game] Takeaway email: collecting addresses for one email ({log.path})', flush=True)
+    return TakeawayDispatcher(mail, log, None)
+
+
+def _create_broadcaster() -> TakeawayBroadcaster:
+    mail, sender, via = _resolve_sender()
+    if sender is None:
+        print('[game] Send-email button: no sender set up (run python -m app.game.gmail_authorize)', flush=True)
+    else:
+        print(f'[game] Send-email button: ready, sends via {via}', flush=True)
+    return TakeawayBroadcaster(mail, _takeaway_log(), sender)
+
+
+def _takeaway_log() -> TakeawayLog:
+    return TakeawayLog(resolve_backend_path(settings.takeaway_log_path))
+
+
+def _resolve_sender() -> tuple[MailSettings, Sender | None, str]:
+    """Prefer the Gmail API (HTTPS, works behind corporate SMTP blocks), then SMTP, else none."""
     gmail_token = GmailToken.load(resolve_backend_path(settings.gmail_token_path))
     if gmail_token is not None:
-        print(f'[game] Takeaway email: sending via the Gmail API as {gmail_token.sender}', flush=True)
-        return TakeawayDispatcher(_mail_settings(from_address=gmail_token.sender), log, GmailApiSender(gmail_token))
+        return _mail_settings(from_address=gmail_token.sender), GmailApiSender(gmail_token), f'the Gmail API as {gmail_token.sender}'
     mail = _mail_settings()
     if mail.is_configured:
-        print(f'[game] Takeaway email: sending via {mail.host} as {mail.from_address}', flush=True)
-        return TakeawayDispatcher(mail, log, SmtpSender(mail))
-    print(f'[game] Takeaway email: no sender configured, collecting addresses in {log.path}', flush=True)
-    return TakeawayDispatcher(mail, log, None)
+        return mail, SmtpSender(mail), f'{mail.host} as {mail.from_address}'
+    return mail, None, ''
 
 
 def _mail_settings(from_address: str | None = None) -> MailSettings:

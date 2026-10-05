@@ -16,6 +16,7 @@ EMAIL_PATTERN = re.compile(r'^[A-Za-z0-9.!#$%&\'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(\.
 SMTP_TIMEOUT_SECONDS = 20
 SUBJECT = 'Your LogiSense copilot kit from Flo 2026'
 PROMPT_PATH = 'blob/main/docs/demo/build-your-own-prompt.md'
+GENERIC_GREETING_NAME = 'there'
 SPEAKERS = 'Rachit Singhal, Dinesh Kumar, Sunil Gupta, Gaurav Tyagi and Punhik Gandhi (Nagarro)'
 
 
@@ -66,6 +67,13 @@ def build_takeaway_message(to_address: str, player_name: str, settings: MailSett
     message['To'] = to_address
     message.set_content(plain_body(player_name, settings))
     message.add_alternative(_html_body(player_name, settings), subtype='html')
+    return message
+
+
+def build_bcc_message(recipients: list[str], settings: MailSettings) -> EmailMessage:
+    """One email for the whole room: addressed to the sender, everyone else in BCC so no one sees the others."""
+    message = build_takeaway_message(settings.from_address or '', GENERIC_GREETING_NAME, settings)
+    message['Bcc'] = ', '.join(recipients)
     return message
 
 

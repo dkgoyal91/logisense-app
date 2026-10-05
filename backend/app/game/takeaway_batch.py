@@ -6,15 +6,16 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import csv
 from pathlib import Path
 
 from app.config import resolve_backend_path, settings
-from app.game.takeaway import TakeawayLog
-from app.game.takeaway_mail import SUBJECT, MailSettings, plain_body
+from app.game.takeaway import Sender, TakeawayLog
+from app.game.takeaway_mail import GENERIC_GREETING_NAME, SUBJECT, MailSettings, build_bcc_message, plain_body
 
 BATCH_FILE = 'data/takeaway_batch.txt'
-GENERIC_GREETING_NAME = 'there'
+MAX_DETAIL_LENGTH = 200
 
 
 def read_log(path: Path) -> list[dict[str, str]]:
@@ -50,6 +51,30 @@ def batch_text(recipients: list[str], mail: MailSettings) -> str:
 def mark_sent(log: TakeawayLog, recipients: list[str]) -> None:
     for email in recipients:
         log.record('batch', email, 'sent', 'sent in the post-session BCC email')
+
+
+class TakeawayBroadcaster:
+    """The host's 'Send email to everyone' button: one BCC email to every pending address, then mark them sent."""
+
+    def __init__(self, settings: MailSettings, log: TakeawayLog, sender: Sender | None) -> None:
+        self._settings = settings
+        self._log = log
+        self._sender = sender
+
+    @property
+    def can_send(self) -> bool:
+        return self._sender is not None and bool(self._settings.from_address)
+
+    def pending(self) -> list[str]:
+        return pending_recipients(read_log(self._log.path))
+
+    async def send(self, recipients: list[str]) -> tuple[str, str]:
+        try:
+            await asyncio.to_thread(self._sender.send, build_bcc_message(recipients, self._settings))
+        except Exception as exc:  # reported on the host remote and projector; addresses stay pending for a retry
+            return 'failed', f'{type(exc).__name__}: {exc}'[:MAX_DETAIL_LENGTH]
+        mark_sent(self._log, recipients)
+        return 'sent', ''
 
 
 def _mail_settings() -> MailSettings:

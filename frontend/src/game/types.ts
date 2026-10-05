@@ -54,6 +54,7 @@ export type ShowView = {
   attacks: AttackView[]
   boards: Boards
   bonus: BonusView | null
+  takeaway_broadcast: TakeawayBroadcast | null
 }
 
 export type RosterEntry = { id: string; name: string; total: number; kicked: boolean; race_done: boolean; demo_awarded: boolean }
@@ -65,6 +66,7 @@ export type HostView = ShowView & {
 
 export type TakeawayStatus = 'queued' | 'sent' | 'failed' | 'saved'
 export type Takeaway = { status: TakeawayStatus; email_hint: string | null }
+export type TakeawayBroadcast = { status: 'sending' | 'sent' | 'failed'; count: number; detail: string }
 
 export type Me = {
   id: string
@@ -102,6 +104,7 @@ export type HostAction =
   | 'ask_bonus'
   | 'hands_mode'
   | 'reset'
+  | 'send_takeaway'
 
 export type HostExtras = {
   player_id?: string

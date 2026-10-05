@@ -54,6 +54,7 @@ def show_view(ctx: ViewContext) -> View:
         'attacks': _attack_feed(ctx.state),
         'boards': ctx.boards,
         'bonus': _bonus(ctx.state, viewer_id=None),
+        'takeaway_broadcast': ctx.state.takeaway_broadcast,
     }
 
 

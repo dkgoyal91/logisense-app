@@ -203,3 +203,9 @@
 .takeaway-error { margin: 0; color: var(--g-bad); }
 .takeaway-consent { display: flex; gap: 10px; align-items: flex-start; font-size: 0.9rem; color: var(--g-soft); }
 .takeaway-consent input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
+
+/* Projector: room-wide email banner */
+.takeaway-banner { position: fixed; top: 3vh; left: 50%; transform: translateX(-50%); z-index: 20; padding: 2vh 3vw; border-radius: 999px; font-size: 1.5em; font-weight: 800; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); animation: rise 0.5s ease; white-space: nowrap; }
+.takeaway-banner--sending { background: var(--g-accent-2); color: #1e0b33; }
+.takeaway-banner--sent { background: var(--g-accent); color: #04211d; }
+.takeaway-banner--failed { background: var(--g-warn); color: #2b1d00; }

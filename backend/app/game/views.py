@@ -121,6 +121,7 @@ def _question(ctx: ViewContext) -> View | None:
         'text': question.text,
         'copilot_prompt': question.copilot_prompt,
         'concept': question.concept,
+        'hint': question.hint,
         'options': list(question.options),
         'seconds_left': _seconds_left(ctx),
         'answered_count': len(_current_answers(ctx.state)),

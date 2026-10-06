@@ -17,6 +17,7 @@ export type QuestionView = {
   text: string
   copilot_prompt: string
   concept: string
+  hint: string
   options: string[]
   seconds_left: number
   answered_count: number

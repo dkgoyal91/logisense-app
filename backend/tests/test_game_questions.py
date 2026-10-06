@@ -45,3 +45,18 @@ def test_injection_question_reports_block_when_copilot_errors() -> None:
     blocked = {'table': None, 'sql': None, 'row_count': 0, 'sample_rows': [], 'summary': '', 'error': 'Unsafe SQL detected.'}
     _options, correct = QUESTION_SPECS[4].build_options(blocked, ShipmentCounts(delayed=132, total=660))
     assert correct == BLOCK_WITH_ERROR
+
+
+def test_every_question_has_a_hint_that_does_not_give_the_answer_away() -> None:
+    questions = _real_questions()
+    for question in questions:
+        assert question.hint.startswith('💡')
+        assert question.options[question.correct_index].lower() not in question.hint.lower()
+
+
+def test_row_cap_hint_states_the_live_delayed_count() -> None:
+    initialize_database()
+    with get_connection() as connection:
+        counts = load_shipment_counts(connection)
+    hint = build_questions(run_copilot, counts)[1].hint
+    assert f'{counts.delayed} shipments are delayed' in hint

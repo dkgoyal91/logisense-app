@@ -209,3 +209,11 @@
 .takeaway-banner--sending { background: var(--g-accent-2); color: #1e0b33; }
 .takeaway-banner--sent { background: var(--g-accent); color: #04211d; }
 .takeaway-banner--failed { background: var(--g-warn); color: #2b1d00; }
+
+/* Question context + hint (phone and projector) */
+.pad-question { display: grid; gap: 8px; }
+.pad-meta { margin: 0; color: var(--g-accent-2); font-size: 0.85rem; font-weight: 700; }
+.pad-prompt { margin: 0; background: var(--g-panel); border: 1px solid var(--g-border); border-radius: 14px 14px 14px 4px; padding: 10px 14px; color: var(--g-soft); }
+.pad-text { margin: 0; font-size: 1.3rem; line-height: 1.25; }
+.pad-hint, .stage-hint { margin: 0; color: var(--g-warn); font-weight: 600; }
+.stage-hint { font-size: 1.3em; }

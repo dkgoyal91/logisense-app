@@ -35,6 +35,7 @@ class Question:
     concept: str
     options: tuple[str, ...]
     correct_index: int
+    hint: str = ''
 
 
 @dataclass

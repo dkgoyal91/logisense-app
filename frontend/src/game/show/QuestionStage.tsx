@@ -15,6 +15,7 @@ export function QuestionStage({ question, handsMode, receivedAt }: Props) {
       </header>
       <p className="chat-bubble">“{question.copilot_prompt}”</p>
       <h2 className="stage-question">{question.text}</h2>
+      {question.hint && <p className="stage-hint">{question.hint}</p>}
       <OptionGrid options={question.options} />
       <p className="stage-foot">{handsMode ? '✋ Show of hands!' : `${question.answered_count} answered`}</p>
     </div>

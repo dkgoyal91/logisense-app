@@ -94,3 +94,14 @@ def test_bonus_only_in_bonus_phase_and_marks_votes() -> None:
     assert bob_bonus['questions'][0] == {
         'id': 'q1', 'text': 'Show delayed shipments', 'name': 'Ada', 'votes': 1, 'voted': False, 'mine': False,
     }
+
+
+def test_question_view_carries_the_hint_for_projector_and_phones() -> None:
+    from app.game.models import Question
+
+    state, (ada,) = joined_state('Ada')
+    hinted = [Question('prompt', 'Which?', 'Concept', ('A', 'B', 'C', 'D'), 1, hint='💡 Think.')]
+    engine.advance(state, 1, now=0)
+    ctx = views.build_context(state, hinted, 0.0, JOIN_URL)
+    assert views.show_view(ctx)['question']['hint'] == '💡 Think.'
+    assert views.player_view(ctx, ada)['question']['hint'] == '💡 Think.'

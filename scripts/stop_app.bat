@@ -1,4 +1,8 @@
 @echo off
+REM Stop LogiSense on Windows
+REM Stop either Docker or local Python services (auto-detects which is running)
+REM Usage: scripts\stop_app.bat
+
 setlocal EnableDelayedExpansion
 set "ROOT_DIR=%~dp0.."
 cd /d "%ROOT_DIR%"
@@ -7,7 +11,7 @@ where docker >nul 2>nul
 if not errorlevel 1 (
   docker compose version >nul 2>&1
   if not errorlevel 1 (
-    echo Stopping LogiSense Docker services...
+    echo [logisense] Stopping LogiSense Docker services...
     docker compose down --remove-orphans --volumes
     if not errorlevel 1 exit /b 0
   )
@@ -17,7 +21,7 @@ where docker-compose >nul 2>nul
 if not errorlevel 1 (
   docker-compose version >nul 2>&1
   if not errorlevel 1 (
-    echo Stopping LogiSense Docker services...
+    echo [logisense] Stopping LogiSense Docker services...
     docker-compose down --remove-orphans --volumes
     if not errorlevel 1 exit /b 0
   )
@@ -29,14 +33,14 @@ if not errorlevel 1 (
   if not "!WSL_ROOT_DIR!"=="" (
     wsl.exe bash -lc "docker compose version >/dev/null 2>&1" 2>nul
     if not errorlevel 1 (
-      echo Stopping LogiSense Docker services via WSL...
+      echo [logisense] Stopping LogiSense Docker services via WSL...
       wsl.exe bash -lc "cd '!WSL_ROOT_DIR!' && docker compose down --remove-orphans --volumes" 2>nul
       if not errorlevel 1 exit /b 0
     )
   )
 )
 
-echo Stopping local LogiSense services...
+echo [logisense] Stopping local LogiSense services...
 where py >nul 2>nul
 if not errorlevel 1 (
   py -3.13 run.py stop

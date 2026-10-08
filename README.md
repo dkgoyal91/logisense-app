@@ -39,24 +39,75 @@ Update the following values as needed:
 
 The backend also includes a backend-local example at `backend/.env.example`.
 
-## Run locally
+## Run locally (Python + Node.js, no Docker)
+
+### Prerequisites
+- Python 3.12 or 3.13
+- Node.js and npm
+
+### Windows (PowerShell)
+From the repo root:
+```powershell
+.\scripts\start_app_local.ps1
+```
+
+Or run directly:
+```powershell
+py -3.13 run.py local
+```
+
+### macOS / Linux / WSL (Bash)
+From the repo root:
+```bash
+./scripts/start_app_local.sh
+```
+
+Or run directly:
+```bash
+python3.13 run.py local
+```
+
+### Access after startup
+- Frontend: http://localhost:5173
+- Backend: http://localhost:8000
+- API docs: http://localhost:8000/docs
+
+### Stop the app (Local mode)
+Windows (PowerShell):
+```powershell
+.\scripts\stop_app_local.ps1
+```
+
+macOS / Linux / WSL (Bash):
+```bash
+./scripts/stop_app_local.sh
+```
+
+Or run directly on any platform:
+```bash
+# Windows
+py -3.13 run.py stop
+
+# macOS / Linux / WSL
+python3.13 run.py stop
+```
+
+## Run with Docker
+
+### Prerequisites
+- Docker Desktop
 
 ### Start
 ```bash
-./scripts/manage_app.sh start
+docker compose up --build -d
 ```
 
 ### Stop
 ```bash
-./scripts/manage_app.sh stop
+docker compose down --remove-orphans --volumes
 ```
 
-### Restart
-```bash
-./scripts/manage_app.sh restart
-```
-
-## Access
+### Access
 - Frontend: http://localhost:5173
 - Backend: http://localhost:8000
 - API docs: http://localhost:8000/docs

@@ -66,7 +66,7 @@ TABLE_DEFAULT_ORDER: dict[str, str] = {
 FILTERABLE_COLUMNS: dict[str, list[str]] = {
     'logistics_records': ['status', 'region'],
     'jobs': ['status', 'region', 'current_stage'],
-    'shipments': ['status', 'source_location', 'destination_location', 'origin', 'destination'],
+    'shipments': ['status', 'source_location', 'destination_location'],
     'vehicles': ['status', 'depot'],
 }
 
@@ -130,6 +130,32 @@ def _extract_name(message: str) -> str | None:
     return name if name else None
 
 
+def _extract_record_ref(message: str) -> str | None:
+    match = re.search(r'(?i)\b(?:record\s+ref|record\s+reference|ref)\b\s*["\']?([A-Za-z0-9-]+)["\']?', message)
+    if not match:
+        return None
+    ref = match.group(1).strip()
+    return ref if ref else None
+
+
+def _extract_shipment_id(message: str) -> str | None:
+    patterns = [
+        r'(?i)\bshipment\s+id\s*[:=]?\s*([A-Z]+-\d+)\b',
+        r'(?i)\bshipment\s+([A-Z]+-\d+)\b',
+        r'(?i)\b(?:shipment|delivery)\s+(?:details?|info|record|data)\s+(?:for|of|on)\s*([A-Z]+-\d+)\b',
+        r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:detail|details)\s+(?:for|of|on)\s+(?:shipment|delivery)\s+([A-Z]+-\d+)\b',
+        r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:shipment|delivery)\s+([A-Z]+-\d+)\b',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, message)
+        if match:
+            shipment_id = match.group(1).strip()
+            if shipment_id:
+                return shipment_id
+    return None
+
+
 def _resolve_runtime_table_name(table_name: str) -> str:
     return table_name
 
@@ -191,6 +217,22 @@ def _extract_generic_search_term(message: str) -> str | None:
     return None
 
 
+def _extract_field_search(message: str) -> tuple[str, str] | None:
+    field_patterns = [
+        (r'(?i)\b(?:show\s+(?:me\s+)?|list\s+|display\s+|find\s+|get\s+|search\s+)\s*(?:all\s+)?(?:client|customer)\s*(?:data)?\s*(?:for|related to|associated with|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)', 'client_name'),
+        (r'(?i)\b(?:show\s+(?:me\s+)?|list\s+|display\s+|find\s+|get\s+|search\s+)\s*(?:all\s+)?(?:logistics\s+owner|owner)\s*(?:data)?\s*(?:for|related to|associated with|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)', 'logistics_owner'),
+        (r'(?i)\b(?:show\s+(?:me\s+)?|list\s+|display\s+|find\s+|get\s+|search\s+)\s*(?:all\s+)?(?:operations\s+lead|lead)\s*(?:data)?\s*(?:for|related to|associated with|by)\s+([A-Z][A-Za-z0-9\' .-]+(?:\s+[A-Z][A-Za-z0-9\' .-]+)*)', 'operations_lead'),
+    ]
+
+    for pattern, field_name in field_patterns:
+        match = re.search(pattern, message)
+        if match:
+            value = match.group(1).strip()
+            if value:
+                return field_name, value
+    return None
+
+
 def _build_generic_search_query(table_name: str, search_term: str) -> tuple[str, list[Any]]:
     resolved_table_name = _resolve_runtime_table_name(table_name)
     columns = sorted(ALLOWED_TABLES[table_name])
@@ -203,6 +245,88 @@ def _build_generic_search_query(table_name: str, search_term: str) -> tuple[str,
     return sql, [like_value] * len(columns) + [settings.row_limit]
 
 
+def is_count_request(message: str) -> bool:
+    """Recognize aggregate totals without treating the route_count field as an intent."""
+    return bool(re.search(r'(?i)\b(?:counts?|how many|number of|total)\b', message)) and not bool(
+        re.search(r'(?i)\broute count\b', message)
+    )
+
+
+def _build_count_query(message: str, table_name: str, group_by: str | None = None) -> tuple[str, list[Any], str]:
+    """Count all matching records using allowlisted fields and bound filter values."""
+    conditions: list[str] = []
+    params: list[Any] = []
+    labels = {'shipments': 'shipments', 'vehicles': 'vehicles', 'jobs': 'work orders', 'logistics_records': 'logistics records'}
+    label = labels[table_name]
+    lower_message = message.lower()
+    statuses = {
+        'shipments': ['Delayed', 'Delivered', 'In transit', 'Planned', 'Exception', 'Cancelled'],
+        'vehicles': ['Maintenance', 'Available', 'In use', 'Idle'],
+        'jobs': ['Completed'],
+        'logistics_records': [],
+    }
+    if table_name == 'jobs' and re.search(r'\bopen\b', lower_message):
+        conditions.append('status != ?')
+        params.append('Completed')
+        label = f'open {label}'
+    else:
+        for status in statuses[table_name]:
+            if re.search(r'\b' + re.escape(status.lower()) + r'\b', lower_message):
+                conditions.append('status = ?')
+                params.append(status)
+                label = f'{status.lower()} {label}'
+                break
+
+    if table_name == 'shipments':
+        origin, destination = _extract_route_direction(message)
+        if origin and destination:
+            conditions.extend(['origin = ?', 'destination = ?'])
+            params.extend([origin.title(), destination.title()])
+            label += f' from {origin.title()} to {destination.title()}'
+        else:
+            customer = _extract_customer_filter(message)
+            if customer:
+                conditions.append('customer = ?')
+                params.append(customer)
+                label += f' for {customer}'
+            route_city = re.search(r'(?i)\b(?:for|on|in)\s+([a-z]+)\s+routes?\b', message)
+            if route_city:
+                conditions.append('route LIKE ?')
+                params.append(f'%{route_city.group(1)}%')
+                label += f' on {route_city.group(1).title()} routes'
+    elif table_name == 'logistics_records':
+        record_ref = _extract_record_ref(message)
+        field_search = _extract_field_search(message)
+        search = _extract_generic_search_term(message)
+        if search and search.lower() in {'company', 'customer', 'status', 'route', 'depot', 'region'}:
+            search = None
+        if record_ref:
+            conditions.append('record_ref = ?')
+            params.append(record_ref)
+        elif field_search:
+            field_name, field_value = field_search
+            conditions.append(f'{field_name} LIKE ?')
+            params.append(f'%{field_value}%')
+        elif search:
+            columns = sorted(ALLOWED_TABLES[table_name])
+            conditions.append('(' + ' OR '.join(f'CAST({column} AS TEXT) LIKE ?' for column in columns) + ')')
+            params.extend([f'%{search}%'] * len(columns))
+        if '2025' in lower_message:
+            conditions.append('review_date LIKE ?')
+            params.append('2025%')
+
+    where_sql = ' WHERE ' + ' AND '.join(conditions) if conditions else ''
+    if group_by:
+        if group_by not in ALLOWED_TABLES[table_name]:
+            raise ValueError('This grouping is not available for the selected logistics data.')
+        return (
+            f'SELECT {group_by}, COUNT(*) AS count FROM {table_name}{where_sql} GROUP BY {group_by} ORDER BY count DESC, {group_by} LIMIT ?',
+            [*params, settings.row_limit],
+            label,
+        )
+    return f'SELECT COUNT(*) AS count FROM {table_name}{where_sql}', params, label
+
+
 def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[Any]]:
     resolved_table_name = _resolve_runtime_table_name(table_name)
     columns = ', '.join(sorted(ALLOWED_TABLES[table_name]))
@@ -210,6 +334,27 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
     params: list[Any] = []
 
     if table_name == 'logistics_records':
+        record_ref = _extract_record_ref(message)
+        if record_ref:
+            return (
+                f"SELECT {columns} FROM {resolved_table_name} WHERE record_ref = ? ORDER BY review_date DESC LIMIT ?",
+                [record_ref, settings.row_limit],
+            )
+
+        if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?)\s+(?:for\s+)?(?:each|all)\s+columns?\b', message):
+            return (
+                f"SELECT {columns} FROM {resolved_table_name} ORDER BY review_date DESC LIMIT ?",
+                [settings.row_limit],
+            )
+
+        field_search = _extract_field_search(message)
+        if field_search:
+            field_name, field_value = field_search
+            return (
+                f"SELECT {columns} FROM {resolved_table_name} WHERE {field_name} LIKE ? ORDER BY review_date DESC LIMIT ?",
+                [f'%{field_value}%', settings.row_limit],
+            )
+
         if 'managed by' in lower_message or 'operations lead' in lower_message or 'job director' in lower_message:
             name = _extract_name(message)
             if name:
@@ -233,6 +378,12 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
             return (
                 f"SELECT {columns} FROM {resolved_table_name} WHERE client_name LIKE ? ORDER BY review_date DESC LIMIT ?",
                 ['%Test Client%', settings.row_limit],
+            )
+
+        if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?)\s+(?:for\s+)?(?:each|all)\s+columns?\b', message):
+            return (
+                f"SELECT {columns} FROM {resolved_table_name} ORDER BY review_date DESC LIMIT ?",
+                [settings.row_limit],
             )
 
         generic_search = _extract_generic_search_term(message)
@@ -266,6 +417,13 @@ def _build_query_for_intent(message: str, table_name: str) -> tuple[str, list[An
         )
 
     if table_name == 'shipments':
+        shipment_id = _extract_shipment_id(message)
+        if shipment_id:
+            return (
+                f"SELECT {columns} FROM shipments WHERE shipment_id = ? ORDER BY COALESCE(actual_delivery_date, planned_delivery_date, delivery_date) DESC LIMIT ?",
+                [shipment_id.upper(), settings.row_limit],
+            )
+
         origin, destination = _extract_route_direction(message)
         if origin and destination:
             return (
@@ -369,7 +527,13 @@ def detect_table_from_message(message: str) -> str | None:
     ):
         return 'shipments'
 
-    if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?|logistics(?:\s+records)?)?\s*(?:for|related to|associated with|managed by|owned by|by)\s+[A-Z]', message):
+    if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?|client|logistics\s+owner|owner|operations\s+lead|lead|logistics(?:\s+records)?)?\s*(?:for|related to|associated with|managed by|owned by|by)\s+[A-Z]', message):
+        return 'logistics_records'
+
+    if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:detail|details)?\s*(?:for\s+)?(?:record\s+ref|record\s+reference|ref)\b', message):
+        return 'logistics_records'
+
+    if re.search(r'(?i)\b(?:show|list|display|get|find|search)\s+(?:me\s+)?(?:all\s+)?(?:data|records?)\s+(?:for\s+)?(?:each|all)\s+columns?\b', message):
         return 'logistics_records'
 
     if any(
@@ -437,6 +601,41 @@ def execute_safe_query(message: str, table_hint: str | None = None) -> dict[str,
     table_name = detect_table_from_message(message) or (table_hint if table_hint in ALLOWED_TABLES else None)
     if table_name is None:
         return {'table': None, 'sql': None, 'rows': [], 'summary': 'This question is outside the approved logistics data model.'}
+
+    if is_count_request(message):
+        sql, params, label = _build_count_query(message, table_name)
+        _validate_sql(sql)
+        with get_connection() as connection:
+            count = connection.execute(sql, params).fetchone()['count']
+        result = {
+            'table': table_name,
+            'sql': sql,
+            'rows': [],
+            'count': count,
+            'summary': f'There are {count:,} {label} in the current logistics dataset.',
+        }
+        grouping = re.search(
+            r'(?i)\b(?:by|per|each)\s+(company|customer|status|route|depot|region|source location|destination location)\b'
+            r'|\b(company|customer|status|route|depot|region)[ -]?wise\b',
+            message,
+        )
+        if grouping:
+            field = (grouping.group(1) or grouping.group(2)).lower()
+            customer_column = 'customer' if table_name == 'shipments' else 'client_name'
+            group_by = {'company': customer_column, 'customer': customer_column}.get(field, field.replace(' ', '_'))
+            if group_by not in ALLOWED_TABLES[table_name]:
+                return {'table': None, 'sql': None, 'rows': [], 'summary': 'This grouping is not available for the selected logistics data.'}
+            group_sql, group_params, _label = _build_count_query(message, table_name, group_by)
+            _validate_sql(group_sql)
+            with get_connection() as connection:
+                counts = [dict(row) for row in connection.execute(group_sql, group_params).fetchall()]
+            breakdown = '; '.join(f'{row[group_by]}: {row["count"]:,}' for row in counts)
+            result['counts'] = counts
+            result['sql'] = group_sql
+            result['summary'] += f' By {field}: {breakdown or "no matching groups"}.'
+            if len(counts) == settings.row_limit:
+                result['summary'] += f' Up to {settings.row_limit} groups are shown; the total covers all matches.'
+        return result
 
     sql, params = _build_query_for_intent(message, table_name)
     _validate_sql(sql)

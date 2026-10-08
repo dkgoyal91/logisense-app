@@ -114,6 +114,10 @@ const quickStartActions: PromptAction[] = [
 ]
 
 const suggestedPrompts: PromptAction[] = [
+  { label: 'Count delayed shipments', prompt: 'How many delayed shipments are there?' },
+  { label: 'Count delayed shipments by company', prompt: 'Count delayed shipments by company' },
+  { label: 'Count open work orders', prompt: 'Count open work orders' },
+  { label: 'Count vehicles in maintenance', prompt: 'Count vehicles in maintenance' },
   { label: 'Add route from Manchester to Leeds', prompt: 'Create route from Manchester to Leeds for the next dispatch cycle' },
   { label: 'Show delayed shipments for Birmingham routes', prompt: 'Show delayed shipments for Birmingham routes' },
   { label: 'Which logistics routes have the highest delivery risk?', prompt: 'Which logistics routes have the highest delivery risk?' },

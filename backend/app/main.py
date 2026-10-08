@@ -7,9 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.chat_agent import process_chat_turn
-from app.config import settings
+from app.config import resolve_backend_path, settings
 from app.database import initialize_database
+from app.game.routes import get_service as get_game_service
+from app.game.routes import router as game_router
 from app.sql_service import get_dashboard_snapshot, get_filter_options, get_live_table_rows
+from app.public_access import install_public_allowlist
+from app.static_site import mount_frontend
 
 app = FastAPI(title=settings.app_name, version='0.1.0')
 
@@ -22,6 +26,10 @@ app.add_middleware(
     allow_methods=['*'],
     allow_headers=['*'],
 )
+
+app.include_router(game_router)
+install_public_allowlist(app, settings.game_public_url)
+get_game_service()
 
 
 class ChatMessage(BaseModel):
@@ -53,6 +61,8 @@ def chat_message(payload: ChatMessage) -> dict[str, object]:
 
     result = process_chat_turn(payload.session_id or 'default-session', message)
     return {
+        **({'count': result['count']} if 'count' in result else {}),
+        **({'counts': result['counts']} if 'counts' in result else {}),
         'answer': result['answer'],
         'table': result.get('table'),
         'rows': result.get('rows', []),
@@ -115,3 +125,6 @@ async def websocket_chat(websocket: WebSocket) -> None:
             await websocket.send_json(result)
     except WebSocketDisconnect:
         return
+
+
+mount_frontend(app, resolve_backend_path(settings.frontend_dist_path))

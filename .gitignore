@@ -7,6 +7,7 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv-verify/
 venv/
 env/
 ENV/
@@ -18,17 +19,28 @@ ENV/
 .coverage.*
 htmlcov/
 *.egg-info/
+*.pytest_cache/
+pip_version.txt
+pytest_ensure_venv.txt
+pytest_exit.txt
 
 # FastAPI / app runtime
 *.log
+*.log.*
 .logisense-*.log
 .logisense-local*.pid
 logs/
 *.sqlite3
+*.sqlite3-*
 *.db
+*.db-journal
+*.db-shm
+*.db-wal
 backend/data/*.db
 backend/data/*.sqlite3
+backend/data/*.db-*
 backend/data/tables_cache.json
+backend/data/*.json
 
 # Node / frontend
 node_modules/
@@ -42,19 +54,46 @@ frontend/.cache/
 .env
 .env.*
 !.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # OS/editor files
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # Build artifacts
 build/
 dist/
 coverage/
+coverage.xml
 
 # Local scripts / generated content
 *.bak
 *.tmp
 *~
+
+# Beat the Copilot live game snapshot
+backend/data/game_snapshot.json
+backend/data/game_snapshot.tmp
+backend/data/takeaway_emails.csv
+backend/data/gmail_token.json
+backend/data/takeaway_batch.txt
+
+# Local launcher state (machine-specific PIDs)
+.logisense-local*.pid
+*.temp
+*.orig
+*.rej
+
+# Local app/process artifacts
+*.pid
+*.lock
+tmp/
+temp/

@@ -61,6 +61,8 @@ def chat_message(payload: ChatMessage) -> dict[str, object]:
 
     result = process_chat_turn(payload.session_id or 'default-session', message)
     return {
+        **({'count': result['count']} if 'count' in result else {}),
+        **({'counts': result['counts']} if 'counts' in result else {}),
         'answer': result['answer'],
         'table': result.get('table'),
         'rows': result.get('rows', []),

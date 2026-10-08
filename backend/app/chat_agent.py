@@ -16,12 +16,13 @@ except ImportError:  # pragma: no cover - graceful path when dependencies are no
     StateGraph = None
 
 from app.config import settings
-from app.sql_service import _extract_customer_filter, _extract_route_direction, detect_table_from_message, execute_safe_query
+from app.sql_service import _extract_customer_filter, _extract_route_direction, detect_table_from_message, execute_safe_query, is_count_request
 
 conversation_store: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=8))
 # Remembers the last table each session queried, so follow-up questions ("show more of those")
 # stay grounded without the user having to restate the table every turn.
 last_table_by_session: dict[str, str | None] = defaultdict(lambda: None)
+last_result_by_session: dict[str, dict[str, Any]] = {}
 
 PROMPT_INJECTION_PATTERN = re.compile(
     r'(?ix)'
@@ -125,17 +126,29 @@ def sql_agent(state: dict[str, Any]) -> dict[str, Any]:
     user_message = state['user_message']
     session_id = state.get('session_id', 'default-session')
 
-    result = execute_safe_query(user_message, table_hint=state.get('table_hint'))
+    previous = last_result_by_session.get(session_id)
+    query_message = user_message
+    if previous and is_count_request(user_message) and re.search(r'(?i)\b(?:those|these|them|results?)\b', user_message):
+        query_message = f'Count {previous["query_message"]}'
+    result = execute_safe_query(query_message, table_hint=state.get('table_hint'))
     table = result.get('table')
     rows = result.get('rows', [])
     summary = result.get('summary', 'No data available.')
 
     if table:
         last_table_by_session[session_id] = table
+        last_result_by_session[session_id] = {**result, 'query_message': query_message}
 
     state['table'] = table
     state['rows'] = rows
     state['summary'] = _sanitize_logistics_text(summary)
+
+    if 'count' in result:
+        state['count'] = result['count']
+        if 'counts' in result:
+            state['counts'] = result['counts']
+        state['grounded_answer'] = state['summary']
+        return state
 
     if table is None:
         state['grounded_answer'] = state['summary']
@@ -207,6 +220,10 @@ def summary_agent(state: dict[str, Any]) -> dict[str, Any]:
     state['final_response'] = state['grounded_answer']
     state['short_summary'] = _build_short_summary(state.get('rows', []), state.get('table'))
 
+    if 'count' in state:
+        state['short_summary'] = state['summary']
+        return state
+
     llm = build_llm()
     if llm is None or not state.get('rows'):
         return state
@@ -271,6 +288,29 @@ except Exception:  # pragma: no cover - graceful fallback when dependencies are 
     agent_graph = None
 
 
+def _conversation_answer(message: str) -> str | None:
+    """Handle bounded social and help intents without querying logistics tables."""
+    normalized = re.sub(r'[^a-z0-9 ]', '', message.lower()).strip()
+    capabilities = (
+        'I can count or show shipments, check delayed deliveries, review fleet maintenance, '
+        'find open work orders, and browse logistics records. '
+        'Try "How many delayed shipments are there?", "Count open work orders", '
+        'or "Show vehicles in maintenance". Counts cover all matching records; detail results are capped.'
+    )
+    if re.fullmatch(r'(?:hi|hello|hey|good morning|good afternoon|good evening)(?: logi ?sense)?', normalized):
+        greeting = normalized.split(' logi')[0].capitalize()
+        return f'{greeting}! How can I help with your logistics operations today?'
+    if normalized in {'how are you', 'how are you doing'}:
+        return 'I am ready to help with your logistics operations. You can ask for shipment counts, fleet status, or open work orders.'
+    if normalized in {'thanks', 'thank you', 'thank you very much'}:
+        return 'You are welcome. What would you like to review next?'
+    if re.fullmatch(r'(?:what (?:can|could) you do(?: for me)?|what you can do(?: for me)?|help|show (?:me )?(?:the )?capabilities|(?:tell|show) me (?:about )?logi ?sense)', normalized):
+        return capabilities
+    if re.fullmatch(r'(?:show|tell)(?: me)?(?: the)? (?:database|data base|available data|data model|tables)', normalized):
+        return 'The approved logistics data contains shipments, vehicles, work orders, and logistics records. ' + capabilities
+    return None
+
+
 def process_chat_turn(session_id: str, user_message: str) -> dict[str, Any]:
     session_id = session_id or 'default-session'
     history = list(conversation_store.get(session_id, []))
@@ -304,7 +344,22 @@ def process_chat_turn(session_id: str, user_message: str) -> dict[str, Any]:
         'session_id': session_id,
     }
 
-    if agent_graph is None:
+    conversational_answer = _conversation_answer(trimmed_message)
+    if re.fullmatch(r'(?i)(?:tell me (?:about )?|explain |summari[sz]e )(?:the |my )?(?:provided |previous |last )?results?[.!?]*', trimmed_message):
+        previous = last_result_by_session.get(session_id)
+        if previous is None:
+            conversational_answer = 'Ask a logistics question first, then I can explain the returned result.'
+        elif 'count' in previous:
+            conversational_answer = previous['summary']
+        else:
+            conversational_answer = (
+                f'The previous query returned {len(previous["rows"])} {previous["table"].replace("_", " ")} records. '
+                'This is a capped detail result, not the full matching total. Ask "How many of those?" for the full count.'
+            )
+    if conversational_answer:
+        state['final_response'] = conversational_answer
+        state['summary'] = conversational_answer
+    elif agent_graph is None:
         state = router_agent(state)
         state = sql_agent(state)
         state = summary_agent(state)
@@ -321,7 +376,7 @@ def process_chat_turn(session_id: str, user_message: str) -> dict[str, Any]:
 
     short_summary = state.get('short_summary') or summary or 'No summary available.'
 
-    return {
+    result = {
         'answer': answer,
         'table': table,
         'rows': rows,
@@ -330,4 +385,9 @@ def process_chat_turn(session_id: str, user_message: str) -> dict[str, Any]:
         'provider': settings.active_ai_provider,
         'context': list(conversation_store[session_id])[-6:],
     }
+    if 'count' in state:
+        result['count'] = state['count']
+    if 'counts' in state:
+        result['counts'] = state['counts']
+    return result
 

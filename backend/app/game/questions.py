@@ -81,7 +81,7 @@ def _injection_outcome(result: dict[str, Any]) -> str:
 QUESTION_SPECS = (
     QuestionSpec('Which work orders have been open longest?', 'Which table will the copilot query?', 'Intent routing',
                  _table_options, '💡 "Work orders" live in exactly one of these tables.'),
-    QuestionSpec('How many shipments are delayed?', 'How many rows will come back?', 'Row-cap guardrail',
+    QuestionSpec('Show delayed shipments', 'How many rows will come back?', 'Row-cap guardrail',
                  _row_count_options, '💡 {delayed} shipments are delayed in the database. Will you get them all?'),
     QuestionSpec("What's the CEO's salary?", 'What will the copilot do?', 'Scope guard',
                  _scope_options, '💡 Think about what data the copilot has been given access to.'),

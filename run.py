@@ -17,6 +17,10 @@ BACKEND_DIR = ROOT / 'backend'
 FRONTEND_DIR = ROOT / 'frontend'
 
 
+def _is_supported_python_version(version: str) -> bool:
+    return version in {'3.12', '3.13'}
+
+
 def _pid_file() -> Path:
     instance_id = os.environ.get('LOGISENSE_INSTANCE', '').strip()
     if instance_id:
@@ -37,6 +41,7 @@ def _find_python_312() -> str:
 
     candidates.extend(
         [
+            'python3.13',
             'python3.12',
             'python3',
             'py',
@@ -45,11 +50,16 @@ def _find_python_312() -> str:
     )
 
     common_paths = [
+        '/opt/homebrew/bin/python3.13',
         '/opt/homebrew/bin/python3.12',
+        '/usr/local/bin/python3.13',
         '/usr/local/bin/python3.12',
+        '/usr/bin/python3.13',
         '/usr/bin/python3.12',
         'C:/Python312/python.exe',
+        'C:/Python313/python.exe',
         'C:/Users/%USERNAME%/AppData/Local/Programs/Python/Python312/python.exe',
+        'C:/Users/%USERNAME%/AppData/Local/Programs/Python/Python313/python.exe',
     ]
     for path in common_paths:
         expanded = os.path.expandvars(path)
@@ -64,7 +74,7 @@ def _find_python_312() -> str:
         try:
             if candidate.lower() == 'py':
                 result = subprocess.run(
-                    ['py', '-3.12', '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'],
+                    ['py', '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'],
                     capture_output=True,
                     text=True,
                     check=True,
@@ -80,10 +90,10 @@ def _find_python_312() -> str:
             continue
 
         version = result.stdout.strip()
-        if version.startswith('3.12'):
+        if _is_supported_python_version(version[:4]):
             return candidate
 
-    raise RuntimeError('Python 3.12 is required. Install Python 3.12 or point PYTHON_BIN to it.')
+    raise RuntimeError('Python 3.12 or 3.13 is required. Install a supported Python version or point PYTHON_BIN to it.')
 
 
 def _venv_python() -> Path:
@@ -97,6 +107,19 @@ def _local_log_file(service_name: str) -> Path:
     instance_id = os.environ.get('LOGISENSE_INSTANCE', '').strip()
     suffix = f'-{instance_id}' if instance_id else ''
     return ROOT / f'.logisense-{service_name}{suffix}.log'
+
+
+def _is_process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _venv_python_version(venv_python: Path) -> str | None:
@@ -117,13 +140,13 @@ def _venv_python_version(venv_python: Path) -> str | None:
 def _ensure_venv(python_executable: str) -> Path:
     venv_python = _venv_python()
     venv_version = _venv_python_version(venv_python)
-    if venv_python.exists() and venv_version == '3.12':
+    if venv_python.exists() and venv_version and _is_supported_python_version(venv_version[:4]):
         return venv_python
-    if venv_python.exists() and venv_version and venv_version != '3.12':
-        _log(f'Recreating .venv because it is using Python {venv_version}, not Python 3.12.')
+    if venv_python.exists() and venv_version and not _is_supported_python_version(venv_version[:4]):
+        _log(f'Recreating .venv because it is using Python {venv_version}, not a supported Python 3.12/3.13 runtime.')
         shutil.rmtree(ROOT / '.venv', ignore_errors=True)
     if not venv_python.exists():
-        _log('Creating Python 3.12 virtual environment in .venv')
+        _log('Creating Python 3.12/3.13 virtual environment in .venv')
         subprocess.run([python_executable, '-m', 'venv', str(ROOT / '.venv')], check=True)
     return venv_python
 
@@ -147,6 +170,13 @@ def _frontend_dependencies_need_install() -> bool:
     return lock_stamp.stat().st_mtime < manifest_mtime
 
 
+def _npm_command() -> str:
+    resolved = shutil.which('npm.cmd') or shutil.which('npm')
+    if resolved:
+        return resolved
+    raise RuntimeError('npm was not found. Install Node.js or ensure npm is available on PATH.')
+
+
 def _ensure_local_dependencies() -> None:
     venv_python = _ensure_venv(_find_python_312())
     _log('Installing backend dependencies')
@@ -155,11 +185,22 @@ def _ensure_local_dependencies() -> None:
 
     if _frontend_dependencies_need_install():
         _log('Installing frontend dependencies')
-        subprocess.run(['npm', 'install'], cwd=str(FRONTEND_DIR), check=True)
+        subprocess.run([_npm_command(), 'install'], cwd=str(FRONTEND_DIR), check=True)
 
 
 def _ensure_local_services_not_running() -> None:
-    if _has_local_process_running() or _pid_file().exists():
+    pid_file = _pid_file()
+    if pid_file.exists():
+        try:
+            pids = json.loads(pid_file.read_text())
+        except Exception:
+            pid_file.unlink(missing_ok=True)
+        else:
+            if any(_is_process_alive(int(pids.get(name, 0) or 0)) for name in ('backend', 'frontend')):
+                raise RuntimeError('Local services already appear to be running. Stop them first with: python3 run.py stop')
+            pid_file.unlink(missing_ok=True)
+
+    if _has_local_process_running():
         raise RuntimeError('Local services already appear to be running. Stop them first with: python3 run.py stop')
 
 
@@ -240,7 +281,7 @@ def _start_local() -> None:
         )
 
         frontend_process = subprocess.Popen(
-            ['npm', 'run', 'dev', '--', '--host', '0.0.0.0', '--port', frontend_port],
+            [_npm_command(), 'run', 'dev', '--', '--host', '0.0.0.0', '--port', frontend_port],
             cwd=str(FRONTEND_DIR),
             stdin=subprocess.DEVNULL,
             stdout=frontend_log_handle,
@@ -379,9 +420,9 @@ def _ensure_docker_compose_file() -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description='LogiSense launcher for Python 3.12 local or Docker-based startup.')
+    parser = argparse.ArgumentParser(description='LogiSense launcher for Python 3.12/3.13 local or Docker-based startup.')
     parser.add_argument('mode', choices=['local', 'docker', 'start', 'stop', 'restart', 'status'], nargs='?')
-    parser.add_argument('--python', dest='python_bin', default=None, help='Explicit Python 3.12 binary to use for the local mode.')
+    parser.add_argument('--python', dest='python_bin', default=None, help='Explicit Python 3.12/3.13 binary to use for the local mode.')
     return parser.parse_args()
 
 

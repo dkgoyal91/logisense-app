@@ -15,7 +15,21 @@ if not errorlevel 1 (
 echo Stopping local LogiSense services...
 where py >nul 2>nul
 if not errorlevel 1 (
+  py -3.13 run.py stop
+  if not errorlevel 1 exit /b 0
   py -3.12 run.py stop
+  if not errorlevel 1 exit /b 0
+)
+
+where python3.13 >nul 2>nul
+if not errorlevel 1 (
+  python3.13 run.py stop
+  if not errorlevel 1 exit /b 0
+)
+
+where python3.12 >nul 2>nul
+if not errorlevel 1 (
+  python3.12 run.py stop
   if not errorlevel 1 exit /b 0
 )
 

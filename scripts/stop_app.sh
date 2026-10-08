@@ -15,7 +15,9 @@ if command -v docker >/dev/null 2>&1; then
 fi
 
 echo "Stopping local LogiSense services..."
-if command -v python3.12 >/dev/null 2>&1; then
+if command -v python3.13 >/dev/null 2>&1; then
+  python3.13 run.py stop
+elif command -v python3.12 >/dev/null 2>&1; then
   python3.12 run.py stop
 else
   python3 run.py stop

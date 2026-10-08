@@ -15,7 +15,21 @@ if not errorlevel 1 (
 echo Docker Compose not available; starting the local Python app...
 where py >nul 2>nul
 if not errorlevel 1 (
+  py -3.13 run.py local
+  if not errorlevel 1 exit /b 0
   py -3.12 run.py local
+  if not errorlevel 1 exit /b 0
+)
+
+where python3.13 >nul 2>nul
+if not errorlevel 1 (
+  python3.13 run.py local
+  if not errorlevel 1 exit /b 0
+)
+
+where python3.12 >nul 2>nul
+if not errorlevel 1 (
+  python3.12 run.py local
   if not errorlevel 1 exit /b 0
 )
 
